@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PARTNERX 伙伴增长控制台</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <section id="loginScreen" class="login-screen">
+    <div class="login-panel">
+      <div class="login-head">
+        <h1>PARTNERX</h1>
+        <p>合作伙伴 · 业绩管理平台</p>
+      </div>
+
+      <div class="login-role-grid">
+        <button class="login-role-card active" data-login-role="boss">
+          <span class="login-role-icon">🏢</span>
+          <strong>企业管理员</strong>
+          <em>管理公司员工与业绩</em>
+        </button>
+        <button class="login-role-card" data-login-role="staff">
+          <span class="login-role-icon">👤</span>
+          <strong>员工</strong>
+          <em>查看个人业绩与用户明细</em>
+        </button>
+      </div>
+
+      <div class="login-form">
+        <label>
+          <span>账号</span>
+          <input id="loginUsername" type="text" placeholder="请输入账号" />
+        </label>
+        <label>
+          <span>密码</span>
+          <input id="loginPassword" type="password" placeholder="请输入密码" />
+        </label>
+        <button id="loginButton" class="login-submit">登 录</button>
+      </div>
+
+      <div class="login-hint">
+        <strong>商务合作与渠道推广统一入口</strong>
+        <p>支持企业管理员管理团队和业绩，支持员工查看个人拉新、付费用户和充值明细。</p>
+      </div>
+    </div>
+  </section>
+
+  <div id="appShell" class="dashboard-shell hidden">
+    <aside class="dashboard-sidebar">
+      <div class="sidebar-brand">
+        <div class="sidebar-brand-badge">PX</div>
+        <div>
+          <h2>PARTNERX</h2>
+          <p>伙伴增长控制台</p>
+        </div>
+      </div>
+
+      <nav class="sidebar-menu">
+        <button class="sidebar-menu-item active" data-section="dashboard" data-role="boss,staff">首页</button>
+        <button class="sidebar-menu-item" data-section="employees" data-role="boss">员工与邀请码</button>
+        <button class="sidebar-menu-item" data-section="employees" data-role="staff">我的推广工具</button>
+        <button class="sidebar-menu-item" data-section="users" data-role="boss,staff">用户业绩明细</button>
+      </nav>
+    </aside>
+
+    <main class="dashboard-main">
+      <header class="dashboard-topbar">
+        <div>
+          <p class="breadcrumb">首页 / 伙伴增长控制台</p>
+          <h3 id="pageTitle">老板端业绩总览</h3>
+        </div>
+        <div class="topbar-actions">
+          <span id="roleBadge" class="head-tip">企业管理员</span>
+          <button id="logoutButton" class="ghost-btn">退出登录</button>
+        </div>
+      </header>
+
+      <section id="filterBoard" class="filter-board hidden">
+        <div class="filter-head">
+          <strong>筛选条件</strong>
+          <p id="filterDescription">按时间和员工查看指定周期内的拉新与充值业绩</p>
+        </div>
+        <div class="filter-grid">
+          <label>
+            <span>开始日期</span>
+            <input type="date" id="startDate" />
+          </label>
+          <label>
+            <span>结束日期</span>
+            <input type="date" id="endDate" />
+          </label>
+          <label id="employeeFilterWrap">
+            <span>员工</span>
+            <select id="employeeFilter"></select>
+          </label>
+          <button id="resetFilters" class="primary-filter-btn">重置筛选</button>
+        </div>
+      </section>
+
+      <section id="bossView" class="role-panel visible">
+        <section class="content-card section-card visible" data-section="dashboard">
+          <div class="content-card-head">
+            <div>
+              <p class="mini-label">老板端总览</p>
+              <h4>公司 / 团队业绩看板</h4>
+            </div>
+            <span class="head-tip">公司级业绩总览</span>
+          </div>
+          <section class="metrics-row" id="bossStats"></section>
+          <div class="dashboard-grid">
+            <div class="white-card">
+              <div class="inner-card-head">
+                <strong>团队成员概览</strong>
+                <span>团队表现</span>
+              </div>
+              <div id="teamCards" class="company-list"></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="content-card section-card" data-section="employees">
+          <div class="content-card-head">
+            <div>
+              <p class="mini-label">员工管理</p>
+              <h4>员工、邀请码与专属链接</h4>
+            </div>
+            <span class="head-tip">团队归因配置</span>
+          </div>
+          <div class="white-card add-employee-card">
+            <div class="inner-card-head">
+              <strong>新增员工</strong>
+              <span>团队管理</span>
+            </div>
+            <form id="employeeForm" class="simple-form">
+              <label>
+                <span>员工姓名</span>
+                <input type="text" id="newEmployeeName" placeholder="例如：Sofia" />
+              </label>
+              <label>
+                <span>邀请码</span>
+                <input type="text" id="newEmployeeCode" placeholder="例如：SOFIA88" />
+              </label>
+              <button type="submit" class="solid-btn">添加员工</button>
+            </form>
+          </div>
+          <div class="table-card">
+            <table>
+              <thead>
+                <tr>
+                  <th>员工</th>
+                  <th>邀请码</th>
+                  <th>拉新人数</th>
+                  <th>付费人数</th>
+                  <th>充值总额</th>
+                  <th>账号状态</th>
+                </tr>
+              </thead>
+              <tbody id="employeeTableBody"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="content-card section-card" data-section="users">
+          <div class="content-card-head">
+            <div>
+              <p class="mini-label">用户明细</p>
+              <h4>老板端查看员工归因用户</h4>
+            </div>
+            <span class="head-tip">按员工归因查看</span>
+          </div>
+          <div class="table-card">
+            <table>
+              <thead>
+                <tr>
+                  <th>用户ID</th>
+                  <th>归因员工</th>
+                  <th>归因方式</th>
+                  <th>国家/地区</th>
+                  <th>首次充值时间</th>
+                  <th>充值笔数</th>
+                  <th>累计充值</th>
+                  <th>最近充值时间</th>
+                </tr>
+              </thead>
+              <tbody id="userTableBody"></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+
+      <section id="staffView" class="role-panel">
+        <section class="content-card section-card visible" data-section="dashboard">
+          <div class="content-card-head">
+            <div>
+              <p class="mini-label">员工端总览</p>
+              <h4>个人拉新与充值业绩</h4>
+            </div>
+            <span class="head-tip">个人业绩总览</span>
+          </div>
+          <section class="metrics-row" id="staffStats"></section>
+          <div class="dashboard-grid">
+            <div class="white-card">
+              <div class="inner-card-head">
+                <strong>我的专属信息</strong>
+                <span>账户信息</span>
+              </div>
+              <dl id="staffProfile" class="detail-list"></dl>
+            </div>
+            <div class="white-card">
+              <div class="inner-card-head">
+                <strong>我的业绩摘要</strong>
+                <span>推广情况</span>
+              </div>
+              <ul class="plain-list">
+                <li>通过我的邀请码注册并消费的用户，自动计入个人业绩。</li>
+                <li>通过我的邀请链接注册并消费的用户，同样计入个人业绩。</li>
+                <li>支持按时间查看拉新人数、付费人数和充值金额。</li>
+              </ul>
+            </div>
+          </div>
+        </section>
+
+        <section class="content-card section-card" data-section="employees">
+          <div class="content-card-head">
+            <div>
+              <p class="mini-label">我的推广工具</p>
+              <h4>我的邀请码</h4>
+            </div>
+            <span class="head-tip">推广素材</span>
+          </div>
+          <div id="toolCards" class="tool-grid"></div>
+        </section>
+
+        <section class="content-card section-card" data-section="users">
+          <div class="content-card-head">
+            <div>
+              <p class="mini-label">我的用户明细</p>
+              <h4>我拉来的用户及充值表现</h4>
+            </div>
+            <span class="head-tip">个人归因用户</span>
+          </div>
+          <div class="table-card">
+            <table>
+              <thead>
+                <tr>
+                  <th>用户ID</th>
+                  <th>国家/地区</th>
+                  <th>首次充值时间</th>
+                  <th>累计充值</th>
+                  <th>充值笔数</th>
+                  <th>最近充值时间</th>
+                  <th>状态</th>
+                </tr>
+              </thead>
+              <tbody id="staffUserTableBody"></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+
+    </main>
+  </div>
+
+  <script src="./app.js"></script>
+</body>
+</html>
