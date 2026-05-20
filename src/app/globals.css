@@ -405,6 +405,22 @@ input {
   padding: 20px;
 }
 
+.formGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  align-items: end;
+}
+
+.inlineBtn {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.04);
+  color: #f2f5fb;
+  border-radius: 12px;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+
 @media (max-width: 1200px) {
   .statsGrid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -412,6 +428,10 @@ input {
 
   .profileGrid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .formGrid {
+    grid-template-columns: 1fr;
   }
 }
 

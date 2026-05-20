@@ -5,6 +5,7 @@ type AuthBody = {
   requesterId?: string;
   requesterCompanyId?: string;
   requesterRole?: string;
+  requesterUsername?: string;
 };
 
 async function verifyBoss(requesterId: string, requesterCompanyId: string, requesterRole: string) {
@@ -20,7 +21,107 @@ async function verifyBoss(requesterId: string, requesterCompanyId: string, reque
   return !!data;
 }
 
-// POST /api/employees — create employee
+type EmployeeRow = {
+  id: string;
+  account_id: string;
+  employee_name: string;
+  invite_code: string;
+  status: string;
+};
+
+type AttributionRow = {
+  employee_id: string;
+  platform_user_id: string;
+};
+
+type RechargeRow = {
+  employee_id: string;
+  platform_user_id: string;
+  amount: number;
+  status: string;
+};
+
+function buildSummary(attributions: AttributionRow[], recharges: RechargeRow[]) {
+  const attributedUserIds = new Set(attributions.map((item) => item.platform_user_id));
+  const paidUserIds = new Set(
+    recharges.filter((item) => item.status === 'success').map((item) => item.platform_user_id)
+  );
+  const totalAmount = recharges
+    .filter((item) => item.status === 'success')
+    .reduce((sum, item) => sum + Number(item.amount || 0), 0);
+
+  return {
+    newUsers: attributedUserIds.size,
+    paidUsers: paidUserIds.size,
+    totalAmount,
+    arppu: paidUserIds.size ? totalAmount / paidUserIds.size : 0
+  };
+}
+
+export async function GET(request: Request) {
+  try {
+    const url = new URL(request.url);
+    const requesterId = url.searchParams.get('requesterId') ?? '';
+    const requesterCompanyId = url.searchParams.get('requesterCompanyId') ?? '';
+    const requesterRole = url.searchParams.get('requesterRole') ?? '';
+    const requesterUsername = url.searchParams.get('requesterUsername') ?? '';
+
+    if (!requesterId || !requesterCompanyId || !requesterRole || !requesterUsername) {
+      return NextResponse.json({ error: '缺少身份信息' }, { status: 401 });
+    }
+
+    const authorized = await verifyBoss(requesterId, requesterCompanyId, requesterRole);
+    if (!authorized) {
+      return NextResponse.json({ error: '无权限' }, { status: 403 });
+    }
+
+    const [employeesResult, attributionsResult, rechargesResult] = await Promise.all([
+      supabaseServer
+        .from('employees')
+        .select('id, account_id, employee_name, invite_code, status')
+        .eq('company_id', requesterCompanyId)
+        .order('created_at', { ascending: true }),
+      supabaseServer
+        .from('attribution_users')
+        .select('employee_id, platform_user_id')
+        .eq('company_id', requesterCompanyId),
+      supabaseServer
+        .from('recharge_orders')
+        .select('employee_id, platform_user_id, amount, status')
+        .eq('company_id', requesterCompanyId)
+    ]);
+
+    if (employeesResult.error || attributionsResult.error || rechargesResult.error) {
+      return NextResponse.json({ error: '读取员工列表失败' }, { status: 500 });
+    }
+
+    const employees = (employeesResult.data ?? []) as EmployeeRow[];
+    const attributions = (attributionsResult.data ?? []) as AttributionRow[];
+    const recharges = (rechargesResult.data ?? []) as RechargeRow[];
+
+    const responseRows = employees.map((employee) => {
+      const employeeAttributions = attributions.filter((item) => item.employee_id === employee.id);
+      const employeeRecharges = recharges.filter((item) => item.employee_id === employee.id);
+      const summary = buildSummary(employeeAttributions, employeeRecharges);
+
+      return {
+        id: employee.id,
+        name: employee.employee_name,
+        inviteCode: employee.invite_code,
+        status: employee.status,
+        ...summary
+      };
+    });
+
+    return NextResponse.json({
+      employees: responseRows
+    });
+  } catch (err) {
+    console.error('读取员工列表失败', err);
+    return NextResponse.json({ error: '服务器错误' }, { status: 500 });
+  }
+}
+
 export async function POST(request: Request) {
   try {
     const body = await request.json() as AuthBody & {
@@ -71,9 +172,9 @@ export async function POST(request: Request) {
       .insert({
         company_id: requesterCompanyId,
         role: 'staff',
-        username,
+        username: username.trim(),
         password_hash: passwordHash,
-        name: employeeName,
+        name: employeeName.trim(),
         status: 'active'
       })
       .select('id')
@@ -106,7 +207,6 @@ export async function POST(request: Request) {
   }
 }
 
-// PATCH /api/employees — toggle employee status
 export async function PATCH(request: Request) {
   try {
     const body = await request.json() as AuthBody & {
