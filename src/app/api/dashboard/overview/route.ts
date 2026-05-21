@@ -116,17 +116,21 @@ export async function POST(request: Request) {
       if (startDate) rechargeQuery = rechargeQuery.gte('pay_time', startDate);
       if (endDate) rechargeQuery = rechargeQuery.lte('pay_time', endDate + 'T23:59:59Z');
 
+      let attributionQuery = supabaseServer
+        .from('attribution_users')
+        .select('employee_id, platform_user_id, invite_code, bind_time')
+        .eq('company_id', companyId);
+        
+      if (startDate) attributionQuery = attributionQuery.gte('bind_time', startDate);
+      if (endDate) attributionQuery = attributionQuery.lte('bind_time', endDate + 'T23:59:59Z');
+
       const [employeesResult, attributionsResult, rechargesResult] = await Promise.all([
         supabaseServer
           .from('employees')
           .select('id, account_id, employee_name, invite_code, inviter_id, status')
           .eq('company_id', companyId)
           .order('created_at', { ascending: true }),
-        supabaseServer
-          .from('attribution_users')
-          .select('employee_id, platform_user_id, invite_code, bind_time')
-          .eq('company_id', companyId)
-          .order('bind_time', { ascending: false }),
+        attributionQuery.order('bind_time', { ascending: false }),
         rechargeQuery.order('pay_time', { ascending: false })
       ]);
 
@@ -195,13 +199,17 @@ export async function POST(request: Request) {
     if (startDate) rechargeQuery = rechargeQuery.gte('pay_time', startDate);
     if (endDate) rechargeQuery = rechargeQuery.lte('pay_time', endDate + 'T23:59:59Z');
 
+    let attributionQuery = supabaseServer
+      .from('attribution_users')
+      .select('employee_id, platform_user_id, invite_code, bind_time')
+      .eq('company_id', companyId)
+      .eq('employee_id', employee.id);
+
+    if (startDate) attributionQuery = attributionQuery.gte('bind_time', startDate);
+    if (endDate) attributionQuery = attributionQuery.lte('bind_time', endDate + 'T23:59:59Z');
+
     const [attributionsResult, rechargesResult] = await Promise.all([
-      supabaseServer
-        .from('attribution_users')
-        .select('employee_id, platform_user_id, invite_code, bind_time')
-        .eq('company_id', companyId)
-        .eq('employee_id', employee.id)
-        .order('bind_time', { ascending: false }),
+      attributionQuery.order('bind_time', { ascending: false }),
       rechargeQuery.order('pay_time', { ascending: false })
     ]);
 
