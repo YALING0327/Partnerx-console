@@ -30,6 +30,18 @@ function toIso(value) {
   return time.toISOString();
 }
 
+function toKeysetTime(value) {
+  if (!value) return '1970-01-01 00:00:00';
+  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/.test(value.trim())) {
+    return value.trim().slice(0, 19);
+  }
+  const time = new Date(value);
+  if (Number.isNaN(time.getTime())) {
+    throw new Error(`时间字段格式不正确: ${value}`);
+  }
+  return time.toISOString().slice(0, 19).replace('T', ' ');
+}
+
 function normalizeStatus(value) {
   const raw = String(value ?? '').toLowerCase();
   if (['success', 'paid', 'pay_success', 'completed', 'finish', 'finished', '1'].includes(raw)) {
@@ -246,7 +258,7 @@ async function main() {
       }
 
       const last = rows[rows.length - 1];
-      attributionKeyset.bind_time = normalizeText(last.bind_time) || attributionKeyset.bind_time;
+      attributionKeyset.bind_time = toKeysetTime(last.bind_time);
       attributionKeyset.platform_user_id = normalizeText(last.platform_user_id) || attributionKeyset.platform_user_id;
 
       if (!dryRun) {
@@ -332,7 +344,7 @@ async function main() {
       }
 
       const last = rows[rows.length - 1];
-      rechargeKeyset.pay_time = normalizeText(last.pay_time) || rechargeKeyset.pay_time;
+      rechargeKeyset.pay_time = toKeysetTime(last.pay_time);
       rechargeKeyset.order_no = normalizeText(last.order_no) || rechargeKeyset.order_no;
 
       if (!dryRun) {
