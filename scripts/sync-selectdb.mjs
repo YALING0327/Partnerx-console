@@ -215,15 +215,17 @@ async function main() {
             ? ` AND t.invite_code = ${mysql.escape(inviteFilterKeys[0])}`
             : ` AND t.invite_code IN (${inviteFilterKeys.map(k => mysql.escape(k)).join(',')})`;
           
+          // 注意：去掉了 t.bind_time > ? 的过滤，因为对于 IN 查询，业务库全表扫描过滤更慢。
+          // 我们直接依赖 IN (邀请码) 走二级索引（如果存在），或者直接全量返回这些邀请码的数据
           const sql = `
             SELECT t.invite_code, t.platform_user_id, t.bind_time
             FROM (${attributionSql}) t
-            WHERE (t.bind_time > ?) OR (t.bind_time = ? AND t.platform_user_id > ?)
+            WHERE 1=1
             ${inviteFilterSql}
             ORDER BY t.bind_time ASC, t.platform_user_id ASC
-            LIMIT ${batchSize}
+            LIMIT ${batchSize} OFFSET ${read}
           `;
-          const [rowsRaw] = await connection.query(sql, [keyset.bind_time, keyset.bind_time, keyset.platform_user_id]);
+          const [rowsRaw] = await connection.query(sql);
           const rows = Array.isArray(rowsRaw) ? rowsRaw : [];
           if (rows.length === 0) break;
 
@@ -293,12 +295,12 @@ async function main() {
           const sql = `
             SELECT t.order_no, t.platform_user_id, t.invite_code, t.amount, t.pay_time, t.status
             FROM (${rechargeSql}) t
-            WHERE (t.pay_time > ?) OR (t.pay_time = ? AND t.order_no > ?)
+            WHERE 1=1
             ${inviteFilterSql}
             ORDER BY t.pay_time ASC, t.order_no ASC
-            LIMIT ${batchSize}
+            LIMIT ${batchSize} OFFSET ${read}
           `;
-          const [rowsRaw] = await connection.query(sql, [keyset.pay_time, keyset.pay_time, keyset.order_no]);
+          const [rowsRaw] = await connection.query(sql);
           const rows = Array.isArray(rowsRaw) ? rowsRaw : [];
           if (rows.length === 0) break;
 
