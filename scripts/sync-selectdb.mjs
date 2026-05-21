@@ -130,6 +130,10 @@ async function main() {
   if (!Number.isFinite(batchSize) || batchSize <= 0) {
     throw new Error('SELECTDB_BATCH_SIZE 必须是正整数');
   }
+  const amountDivisor = Number(process.env.SELECTDB_AMOUNT_DIVISOR || 1);
+  if (!Number.isFinite(amountDivisor) || amountDivisor <= 0) {
+    throw new Error('SELECTDB_AMOUNT_DIVISOR 必须是正数');
+  }
   const debugInviteKey = normalizeInviteCode(process.env.DEBUG_INVITE_KEY);
   const debugEnabled = process.env.DEBUG_MATCH === '1' && !!debugInviteKey;
   const inviteFilterLimit = Number(process.env.SELECTDB_INVITE_FILTER_LIMIT || 2000);
@@ -351,7 +355,7 @@ async function main() {
           employee_id: employeeId,
           platform_user_id: platformUserId,
           order_no: orderNo,
-          amount: Number(row.amount ?? 0),
+          amount: Number(row.amount ?? 0) / amountDivisor,
           status: normalizeStatus(row.status),
           pay_time: toIso(row.pay_time),
           is_first_recharge: false
