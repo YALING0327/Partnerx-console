@@ -53,7 +53,7 @@ type DashboardData =
 type View = 'home' | 'employees' | 'users';
 
 function fmt(value: number) {
-  return new Intl.NumberFormat('zh-CN', { style: 'currency', currency: 'CNY', maximumFractionDigits: 0 }).format(value || 0);
+  return new Intl.NumberFormat('zh-CN', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 }).format(value || 0);
 }
 
 function fmtDate(value: string | null) {
