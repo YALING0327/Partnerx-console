@@ -45,8 +45,59 @@ function normalizeText(value) {
   return String(value ?? '').trim();
 }
 
+function stripTrailingSemicolon(sql) {
+  return String(sql ?? '').trim().replace(/;+\s*$/g, '');
+}
+
+function readJsonFile(filePath) {
+  try {
+    if (!fs.existsSync(filePath)) return null;
+    return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+function writeJsonFile(filePath, value) {
+  const text = JSON.stringify(value, null, 2);
+  fs.writeFileSync(filePath, text, 'utf8');
+}
+
+async function fetchAllEmployees(supabase) {
+  const pageSize = 1000;
+  const employees = [];
+  let from = 0;
+  while (true) {
+    const to = from + pageSize - 1;
+    const { data, error } = await supabase
+      .from('employees')
+      .select('id, company_id, invite_code')
+      .order('id', { ascending: true })
+      .range(from, to);
+
+    if (error) throw error;
+    if (!data || data.length === 0) break;
+    employees.push(...data);
+    if (data.length < pageSize) break;
+    from += pageSize;
+  }
+  return employees;
+}
+
+function chunkArray(items, size) {
+  const result = [];
+  for (let i = 0; i < items.length; i += size) {
+    result.push(items.slice(i, i + size));
+  }
+  return result;
+}
+
 async function main() {
   const dryRun = process.env.DRY_RUN === '1';
+  const batchSize = Number(process.env.SELECTDB_BATCH_SIZE || 5000);
+  if (!Number.isFinite(batchSize) || batchSize <= 0) {
+    throw new Error('SELECTDB_BATCH_SIZE 必须是正整数');
+  }
 
   const realtimeOptions = {};
   if (typeof globalThis.WebSocket === 'undefined') {
@@ -66,8 +117,16 @@ async function main() {
     }
   );
 
-  const registerSql = process.env.SELECTDB_ATTRIBUTION_SQL || required('SELECTDB_REGISTER_SQL');
-  const rechargeSql = required('SELECTDB_RECHARGE_SQL');
+  const attributionSql = stripTrailingSemicolon(
+    process.env.SELECTDB_ATTRIBUTION_SQL || required('SELECTDB_REGISTER_SQL')
+  );
+  const rechargeSql = stripTrailingSemicolon(required('SELECTDB_RECHARGE_SQL'));
+
+  const cursorFilePath = path.resolve(process.cwd(), '.selectdb-sync-cursor.json');
+  const resetCursor = process.env.SELECTDB_CURSOR_RESET === '1';
+  const cursor = resetCursor
+    ? { attribution: null, recharge: null }
+    : (readJsonFile(cursorFilePath) ?? { attribution: null, recharge: null });
 
   const connection = await mysql.createConnection({
     host: required('SELECTDB_HOST'),
@@ -80,137 +139,172 @@ async function main() {
   try {
     console.log('开始读取 SelectDB 数据...');
 
-    const [registerRowsRaw] = await connection.query(registerSql);
-    const [rechargeRowsRaw] = await connection.query(rechargeSql);
-
-    const registerRows = Array.isArray(registerRowsRaw) ? registerRowsRaw : [];
-    const rechargeRows = Array.isArray(rechargeRowsRaw) ? rechargeRowsRaw : [];
-
-    console.log(`邀请码归因记录: ${registerRows.length} 条`);
-    console.log(`充值记录: ${rechargeRows.length} 条`);
-
-    const inviteCodes = [...new Set(
-      [...registerRows, ...rechargeRows]
-        .map((item) => normalizeText(item.invite_code))
-        .filter(Boolean)
-    )];
-
-    if (inviteCodes.length === 0) {
-      throw new Error('归因查询没有返回邀请码字段，请检查 SELECTDB_ATTRIBUTION_SQL 或 SELECTDB_REGISTER_SQL 的别名是否正确');
-    }
-
-    const { data: employees, error: employeeError } = await supabase
-      .from('employees')
-      .select('id, company_id, invite_code')
-      .in('invite_code', inviteCodes);
-
-    if (employeeError) {
-      throw employeeError;
-    }
-
+    const employees = await fetchAllEmployees(supabase);
     const employeeByInviteCode = new Map(
       (employees ?? []).map((item) => [String(item.invite_code).trim(), item])
     );
 
-    const attributionRows = [];
-    for (const row of registerRows) {
-      const inviteCode = normalizeText(row.invite_code);
-      const platformUserId = normalizeText(row.platform_user_id);
-      if (!inviteCode || !platformUserId) continue;
+    const attributionCache = new Map();
 
-      const employee = employeeByInviteCode.get(inviteCode);
-      if (!employee) continue;
+    const attributionKeyset = cursor.attribution ?? {
+      bind_time: process.env.SELECTDB_ATTRIBUTION_START_TIME || '1970-01-01 00:00:00',
+      platform_user_id: ''
+    };
 
-      attributionRows.push({
-        company_id: employee.company_id,
-        employee_id: employee.id,
-        platform_user_id: platformUserId,
-        invite_code: inviteCode,
-        bind_time: toIso(row.bind_time),
-        bind_status: 'bound'
-      });
-    }
+    let attributionRead = 0;
+    let attributionHit = 0;
+    while (true) {
+      const sql = `
+        SELECT *
+        FROM (${attributionSql}) t
+        WHERE (t.bind_time > ?) OR (t.bind_time = ? AND t.platform_user_id > ?)
+        ORDER BY t.bind_time ASC, t.platform_user_id ASC
+        LIMIT ${batchSize}
+      `;
+      const [rowsRaw] = await connection.query(sql, [
+        attributionKeyset.bind_time,
+        attributionKeyset.bind_time,
+        attributionKeyset.platform_user_id
+      ]);
+      const rows = Array.isArray(rowsRaw) ? rowsRaw : [];
+      if (rows.length === 0) break;
 
-    const dedupAttributions = [...new Map(
-      attributionRows.map((item) => [`${item.company_id}:${item.platform_user_id}`, item])
-    ).values()];
+      attributionRead += rows.length;
+      console.log(`归因批次读取: ${rows.length} 条（累计 ${attributionRead}）`);
 
-    console.log(`命中本控制台邀请码的归因记录: ${dedupAttributions.length} 条`);
+      const batchUpserts = [];
+      for (const row of rows) {
+        const inviteCode = normalizeText(row.invite_code);
+        const platformUserId = normalizeText(row.platform_user_id);
+        if (!inviteCode || !platformUserId) continue;
 
-    if (!dryRun && dedupAttributions.length > 0) {
-      const { error } = await supabase
-        .from('attribution_users')
-        .upsert(dedupAttributions, { onConflict: 'company_id,platform_user_id' });
-      if (error) throw error;
-    }
+        const employee = employeeByInviteCode.get(inviteCode);
+        if (!employee) continue;
 
-    const platformUserIds = [...new Set(dedupAttributions.map((item) => item.platform_user_id))];
-    const attributionMap = new Map(
-      dedupAttributions.map((item) => [String(item.platform_user_id), item])
-    );
-
-    if (platformUserIds.length > 0) {
-      const { data: currentAttributions, error: attributionError } = await supabase
-        .from('attribution_users')
-        .select('company_id, employee_id, platform_user_id')
-        .in('platform_user_id', platformUserIds);
-
-      if (attributionError) {
-        throw attributionError;
+        attributionHit += 1;
+        batchUpserts.push({
+          company_id: employee.company_id,
+          employee_id: employee.id,
+          platform_user_id: platformUserId,
+          invite_code: inviteCode,
+          bind_time: toIso(row.bind_time),
+          bind_status: 'bound'
+        });
       }
 
-      for (const item of currentAttributions ?? []) {
-        attributionMap.set(String(item.platform_user_id), item);
+      for (const chunk of chunkArray(batchUpserts, 1000)) {
+        if (!dryRun && chunk.length > 0) {
+          const { error } = await supabase
+            .from('attribution_users')
+            .upsert(chunk, { onConflict: 'company_id,platform_user_id' });
+          if (error) throw error;
+        }
+        for (const item of chunk) {
+          attributionCache.set(String(item.platform_user_id), {
+            company_id: item.company_id,
+            employee_id: item.employee_id,
+            platform_user_id: item.platform_user_id
+          });
+        }
+      }
+
+      const last = rows[rows.length - 1];
+      attributionKeyset.bind_time = normalizeText(last.bind_time) || attributionKeyset.bind_time;
+      attributionKeyset.platform_user_id = normalizeText(last.platform_user_id) || attributionKeyset.platform_user_id;
+
+      if (!dryRun) {
+        cursor.attribution = { ...attributionKeyset };
+        writeJsonFile(cursorFilePath, cursor);
       }
     }
 
-    const firstPayTimeByUser = new Map();
-    for (const row of rechargeRows) {
-      const status = normalizeStatus(row.status);
-      if (status !== 'success') continue;
-      const userId = normalizeText(row.platform_user_id);
-      if (!userId) continue;
-      const payTime = toIso(row.pay_time);
-      const existing = firstPayTimeByUser.get(userId);
-      if (!existing || new Date(payTime).getTime() < new Date(existing).getTime()) {
-        firstPayTimeByUser.set(userId, payTime);
+    console.log(`归因读取完成：读取 ${attributionRead} 条，命中邀请码 ${attributionHit} 条`);
+
+    const rechargeKeyset = cursor.recharge ?? {
+      pay_time: process.env.SELECTDB_RECHARGE_START_TIME || '1970-01-01 00:00:00',
+      order_no: ''
+    };
+
+    let rechargeRead = 0;
+    let rechargeHit = 0;
+    while (true) {
+      const sql = `
+        SELECT *
+        FROM (${rechargeSql}) t
+        WHERE (t.pay_time > ?) OR (t.pay_time = ? AND t.order_no > ?)
+        ORDER BY t.pay_time ASC, t.order_no ASC
+        LIMIT ${batchSize}
+      `;
+      const [rowsRaw] = await connection.query(sql, [
+        rechargeKeyset.pay_time,
+        rechargeKeyset.pay_time,
+        rechargeKeyset.order_no
+      ]);
+      const rows = Array.isArray(rowsRaw) ? rowsRaw : [];
+      if (rows.length === 0) break;
+
+      rechargeRead += rows.length;
+      console.log(`充值批次读取: ${rows.length} 条（累计 ${rechargeRead}）`);
+
+      const platformUserIds = [...new Set(rows.map((r) => normalizeText(r.platform_user_id)).filter(Boolean))];
+      const missingUserIds = platformUserIds.filter((id) => !attributionCache.has(id));
+      for (const group of chunkArray(missingUserIds, 200)) {
+        const { data, error } = await supabase
+          .from('attribution_users')
+          .select('company_id, employee_id, platform_user_id')
+          .in('platform_user_id', group);
+        if (error) throw error;
+        for (const item of data ?? []) {
+          attributionCache.set(String(item.platform_user_id), item);
+        }
+      }
+
+      const batchRechargeUpserts = [];
+      for (const row of rows) {
+        const platformUserId = normalizeText(row.platform_user_id);
+        const orderNo = normalizeText(row.order_no);
+        const inviteCode = normalizeText(row.invite_code);
+        if (!platformUserId || !orderNo) continue;
+
+        const attribution = attributionCache.get(platformUserId);
+        const employee = inviteCode ? employeeByInviteCode.get(inviteCode) : null;
+        const companyId = attribution?.company_id ?? employee?.company_id;
+        const employeeId = attribution?.employee_id ?? employee?.id;
+        if (!companyId || !employeeId) continue;
+
+        rechargeHit += 1;
+        batchRechargeUpserts.push({
+          company_id: companyId,
+          employee_id: employeeId,
+          platform_user_id: platformUserId,
+          order_no: orderNo,
+          amount: Number(row.amount ?? 0),
+          status: normalizeStatus(row.status),
+          pay_time: toIso(row.pay_time),
+          is_first_recharge: false
+        });
+      }
+
+      for (const chunk of chunkArray(batchRechargeUpserts, 1000)) {
+        if (!dryRun && chunk.length > 0) {
+          const { error } = await supabase
+            .from('recharge_orders')
+            .upsert(chunk, { onConflict: 'order_no' });
+          if (error) throw error;
+        }
+      }
+
+      const last = rows[rows.length - 1];
+      rechargeKeyset.pay_time = normalizeText(last.pay_time) || rechargeKeyset.pay_time;
+      rechargeKeyset.order_no = normalizeText(last.order_no) || rechargeKeyset.order_no;
+
+      if (!dryRun) {
+        cursor.recharge = { ...rechargeKeyset };
+        writeJsonFile(cursorFilePath, cursor);
       }
     }
 
-    const rechargeUpserts = [];
-    for (const row of rechargeRows) {
-      const platformUserId = normalizeText(row.platform_user_id);
-      const orderNo = normalizeText(row.order_no);
-      const inviteCode = normalizeText(row.invite_code);
-      if (!platformUserId || !orderNo) continue;
-
-      const attribution = attributionMap.get(platformUserId);
-      const employee = inviteCode ? employeeByInviteCode.get(inviteCode) : null;
-      const companyId = attribution?.company_id ?? employee?.company_id;
-      const employeeId = attribution?.employee_id ?? employee?.id;
-      if (!companyId || !employeeId) continue;
-
-      const payTime = toIso(row.pay_time);
-      rechargeUpserts.push({
-        company_id: companyId,
-        employee_id: employeeId,
-        platform_user_id: platformUserId,
-        order_no: orderNo,
-        amount: Number(row.amount ?? 0),
-        status: normalizeStatus(row.status),
-        pay_time: payTime,
-        is_first_recharge: firstPayTimeByUser.get(platformUserId) === payTime
-      });
-    }
-
-    console.log(`命中已归因用户的充值记录: ${rechargeUpserts.length} 条`);
-
-    if (!dryRun && rechargeUpserts.length > 0) {
-      const { error } = await supabase
-        .from('recharge_orders')
-        .upsert(rechargeUpserts, { onConflict: 'order_no' });
-      if (error) throw error;
-    }
+    console.log(`充值读取完成：读取 ${rechargeRead} 条，命中归因 ${rechargeHit} 条`);
 
     console.log(dryRun ? 'Dry Run 完成，没有写入 Supabase' : '同步完成，已写入 Supabase');
   } finally {
