@@ -80,41 +80,22 @@ async function fetchAllEmployees(supabase) {
   let from = 0;
   while (true) {
     const to = from + pageSize - 1;
-    let data;
-    let error;
+    let data = null;
+    let error = null;
 
-    ({ data, error } = await supabase
-      .from('employees')
-      .select(selectColumns)
-      .order('id', { ascending: true })
-      .range(from, to));
-
-    if (error) {
-      const message = String(error.message || '').toLowerCase();
-      const next = selectCandidates.find((candidate) => candidate !== selectColumns && !message.includes('column'));
-      if (next) {
-        selectColumns = next;
-        ({ data, error } = await supabase
-          .from('employees')
-          .select(selectColumns)
-          .order('id', { ascending: true })
-          .range(from, to));
-      } else {
-        for (const candidate of selectCandidates) {
-          ({ data, error } = await supabase
-            .from('employees')
-            .select(candidate)
-            .order('id', { ascending: true })
-            .range(from, to));
-          if (!error) {
-            selectColumns = candidate;
-            break;
-          }
-        }
-      }
+    for (const candidate of [selectColumns, ...selectCandidates.filter((c) => c !== selectColumns)]) {
+      selectColumns = candidate;
+      ({ data, error } = await supabase
+        .from('employees')
+        .select(selectColumns)
+        .order('id', { ascending: true })
+        .range(from, to));
+      if (!error) break;
     }
 
-    if (error) throw error;
+    if (error) {
+      throw error;
+    }
     if (!data || data.length === 0) break;
     employees.push(...data);
     if (data.length < pageSize) break;
