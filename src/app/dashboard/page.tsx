@@ -28,7 +28,7 @@ type DashboardUser = {
   platformUserId: string;
   employeeName: string;
   inviteCode: string;
-  bindTime: string;
+  bindTime: string | null;
   firstRechargeAt: string | null;
   lastRechargeAt: string | null;
   rechargeCount: number;

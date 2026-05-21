@@ -40,7 +40,7 @@ function formatDashboardUser(
   userId: string,
   inviteCode: string,
   employeeName: string,
-  bindTime: string,
+  bindTime: string | null,
   orders: RechargeRow[]
 ) {
   const paidOrders = orders.filter((item) => item.status === 'success');
@@ -158,14 +158,28 @@ export async function POST(request: Request) {
         ordersByUser.set(order.platform_user_id, current);
       }
 
-      const users = attributions.map((item) => {
-        const employee = employeeMap.get(item.employee_id);
+      const attributionMap = new Map<string, AttributionRow>();
+      for (const a of attributions) {
+        attributionMap.set(a.platform_user_id, a);
+      }
+
+      const allUserIds = new Set([
+        ...attributions.map((a) => a.platform_user_id),
+        ...recharges.map((r) => r.platform_user_id)
+      ]);
+
+      const users = Array.from(allUserIds).map((platformUserId) => {
+        const attr = attributionMap.get(platformUserId);
+        const userOrders = ordersByUser.get(platformUserId) ?? [];
+        const employeeId = attr?.employee_id ?? userOrders[0]?.employee_id;
+        const emp = employeeId ? employeeMap.get(employeeId) : undefined;
+        
         return formatDashboardUser(
-          item.platform_user_id,
-          item.invite_code,
-          employee?.employee_name ?? '未知员工',
-          item.bind_time,
-          ordersByUser.get(item.platform_user_id) ?? []
+          platformUserId,
+          attr?.invite_code ?? emp?.invite_code ?? '-',
+          emp?.employee_name ?? '未知员工',
+          attr?.bind_time ?? null,
+          userOrders
         );
       });
 
@@ -227,15 +241,28 @@ export async function POST(request: Request) {
       ordersByUser.set(order.platform_user_id, current);
     }
 
-    const users = attributions.map((item) =>
-      formatDashboardUser(
-        item.platform_user_id,
-        item.invite_code,
+    const attributionMap = new Map<string, AttributionRow>();
+    for (const a of attributions) {
+      attributionMap.set(a.platform_user_id, a);
+    }
+
+    const allUserIds = new Set([
+      ...attributions.map((a) => a.platform_user_id),
+      ...recharges.map((r) => r.platform_user_id)
+    ]);
+
+    const users = Array.from(allUserIds).map((platformUserId) => {
+      const attr = attributionMap.get(platformUserId);
+      const userOrders = ordersByUser.get(platformUserId) ?? [];
+      
+      return formatDashboardUser(
+        platformUserId,
+        attr?.invite_code ?? employee.invite_code,
         employee.employee_name,
-        item.bind_time,
-        ordersByUser.get(item.platform_user_id) ?? []
-      )
-    );
+        attr?.bind_time ?? null,
+        userOrders
+      );
+    });
 
     return NextResponse.json({
       role,
