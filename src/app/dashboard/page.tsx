@@ -84,6 +84,8 @@ export default function DashboardPage() {
   const [lang, setLang] = useState<Lang>('zh');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
+  const [appliedStartDate, setAppliedStartDate] = useState('');
+  const [appliedEndDate, setAppliedEndDate] = useState('');
   const [filterEmployee, setFilterEmployee] = useState('');
 
   // Employee creation form
@@ -126,8 +128,8 @@ export default function DashboardPage() {
   }, [lang]);
 
   useEffect(() => {
-    if (user) void loadDashboard(user, startDate, endDate);
-  }, [user, loadDashboard, startDate, endDate]);
+    if (user) void loadDashboard(user, appliedStartDate, appliedEndDate);
+  }, [user, loadDashboard, appliedStartDate, appliedEndDate]);
 
   async function handleAddEmployee(e: React.FormEvent) {
     e.preventDefault();
@@ -153,7 +155,7 @@ export default function DashboardPage() {
       if (!res.ok) { setFormError(result.error ?? '创建失败'); return; }
       setShowAddForm(false);
       setNewName(''); setNewUsername(''); setNewPassword(''); setNewInviteCode(''); setNewInviterId('');
-      void loadDashboard(user, startDate, endDate);
+      void loadDashboard(user, appliedStartDate, appliedEndDate);
     } catch (e) {
       setFormError(e instanceof Error ? e.message : '创建失败');
     } finally {
@@ -169,7 +171,7 @@ export default function DashboardPage() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ requesterId: user.id, requesterCompanyId: user.companyId, requesterRole: user.role, employeeId, action })
     });
-    void loadDashboard(user, startDate, endDate);
+    void loadDashboard(user, appliedStartDate, appliedEndDate);
   }
 
   function handleLogout() {
@@ -384,7 +386,8 @@ export default function DashboardPage() {
                       </select>
                     </label>
                   )}
-                  {(startDate || endDate || filterEmployee) && <button className="cancelBtn" onClick={() => { setStartDate(''); setEndDate(''); setFilterEmployee(''); }}>{t(lang, 'filter_clear')}</button>}
+                  <button className="addBtn" onClick={() => { setAppliedStartDate(startDate); setAppliedEndDate(endDate); }}>{t(lang, 'filter_search')}</button>
+                  {(startDate || endDate || filterEmployee || appliedStartDate || appliedEndDate) && <button className="cancelBtn" onClick={() => { setStartDate(''); setEndDate(''); setAppliedStartDate(''); setAppliedEndDate(''); setFilterEmployee(''); }}>{t(lang, 'filter_clear')}</button>}
                 </div>
 
                 <div className="tableWrap">

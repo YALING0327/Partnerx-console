@@ -123,6 +123,7 @@ const dictionary = {
     filter_end: '结束日期',
     filter_employee: '归因员工',
     filter_all_employees: '全部员工',
+    filter_search: '查找',
     filter_clear: '清除筛选',
     empty: '暂无数据'
   },
@@ -232,6 +233,7 @@ const dictionary = {
     filter_end: 'End',
     filter_employee: 'Employee',
     filter_all_employees: 'All',
+    filter_search: 'Search',
     filter_clear: 'Clear',
     empty: 'No data'
   }
