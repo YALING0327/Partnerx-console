@@ -209,7 +209,9 @@ async function main() {
     let attributionHit = 0;
     while (true) {
       const inviteFilterSql = useInviteFilter
-        ? ` AND t.invite_code IN (${inviteFilterKeys.map(() => '?').join(',')})`
+        ? inviteFilterKeys.length === 1
+          ? ' AND t.invite_code = ?'
+          : ` AND t.invite_code IN (${inviteFilterKeys.map(() => '?').join(',')})`
         : '';
       const sql = `
         SELECT t.invite_code, t.platform_user_id, t.bind_time
@@ -293,7 +295,9 @@ async function main() {
     let rechargeHit = 0;
     while (true) {
       const inviteFilterSql = useInviteFilter
-        ? ` AND t.invite_code IN (${inviteFilterKeys.map(() => '?').join(',')})`
+        ? inviteFilterKeys.length === 1
+          ? ' AND t.invite_code = ?'
+          : ` AND t.invite_code IN (${inviteFilterKeys.map(() => '?').join(',')})`
         : '';
       const sql = `
         SELECT t.order_no, t.platform_user_id, t.invite_code, t.amount, t.pay_time, t.status
