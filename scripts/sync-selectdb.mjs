@@ -118,6 +118,8 @@ async function main() {
   if (!Number.isFinite(batchSize) || batchSize <= 0) {
     throw new Error('SELECTDB_BATCH_SIZE 必须是正整数');
   }
+  const debugInviteKey = normalizeInviteCode(process.env.DEBUG_INVITE_KEY);
+  const debugEnabled = process.env.DEBUG_MATCH === '1' && !!debugInviteKey;
 
   const realtimeOptions = {};
   if (typeof globalThis.WebSocket === 'undefined') {
@@ -169,6 +171,10 @@ async function main() {
       const attributionKey = normalizeInviteCode(employee.attribution_key);
       if (attributionKey) employeeByInviteCode.set(attributionKey, employee);
     }
+    if (debugEnabled) {
+      console.log(`DEBUG_MATCH employee keys: total=${employeeByInviteCode.size}`);
+      console.log(`DEBUG_MATCH employee has ${debugInviteKey}: ${employeeByInviteCode.has(debugInviteKey)}`);
+    }
 
     const attributionCache = new Map();
 
@@ -199,10 +205,12 @@ async function main() {
       console.log(`归因批次读取: ${rows.length} 条（累计 ${attributionRead}）`);
 
       const batchUpserts = [];
+      let debugRows = 0;
       for (const row of rows) {
         const inviteCode = normalizeInviteCode(row.invite_code);
         const platformUserId = normalizeText(row.platform_user_id);
         if (!inviteCode || !platformUserId) continue;
+        if (debugEnabled && inviteCode === debugInviteKey) debugRows += 1;
 
         const employee = employeeByInviteCode.get(inviteCode);
         if (!employee) continue;
@@ -216,6 +224,9 @@ async function main() {
           bind_time: toIso(row.bind_time),
           bind_status: 'bound'
         });
+      }
+      if (debugEnabled) {
+        console.log(`DEBUG_MATCH attribution batch: invite=${debugInviteKey} rows=${debugRows} upserts=${batchUpserts.length}`);
       }
 
       for (const chunk of chunkArray(batchUpserts, 1000)) {
