@@ -15,6 +15,7 @@ type BossEmployee = {
   id: string;
   name: string;
   inviteCode: string;
+  inviterId: string | null;
   status: string;
   newUsers: number;
   paidUsers: number;
@@ -45,7 +46,7 @@ type DashboardData =
       role: 'staff';
       currentUser: { name: string | null; username: string };
       summary: { newUsers: number; paidUsers: number; totalAmount: number; arppu: number };
-      profile: { name: string; inviteCode: string; status: string };
+      profile: { name: string; inviteCode: string; inviterId: string | null; status: string };
       users: DashboardUser[];
     };
 
@@ -88,6 +89,7 @@ export default function DashboardPage() {
   const [newUsername, setNewUsername] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [newInviteCode, setNewInviteCode] = useState('');
+  const [newInviterId, setNewInviterId] = useState('');
   const [formError, setFormError] = useState('');
   const [formLoading, setFormLoading] = useState(false);
 
@@ -136,13 +138,14 @@ export default function DashboardPage() {
           employeeName: newName,
           username: newUsername,
           password: newPassword,
-          inviteCode: newInviteCode
+          inviteCode: newInviteCode,
+          inviterId: newInviterId
         })
       });
       const result = await res.json() as { message?: string; error?: string };
       if (!res.ok) { setFormError(result.error ?? '创建失败'); return; }
       setShowAddForm(false);
-      setNewName(''); setNewUsername(''); setNewPassword(''); setNewInviteCode('');
+      setNewName(''); setNewUsername(''); setNewPassword(''); setNewInviteCode(''); setNewInviterId('');
       void loadDashboard(user, startDate, endDate);
     } catch (e) {
       setFormError(e instanceof Error ? e.message : '创建失败');
@@ -238,11 +241,11 @@ export default function DashboardPage() {
                     </div>
                     <div className="tableWrap">
                       <table className="dataTable">
-                        <thead><tr><th>员工</th><th>邀请码</th><th>拉新人数</th><th>付费人数</th><th>充值总额</th><th>状态</th></tr></thead>
+                        <thead><tr><th>员工</th><th>邀请码</th><th>邀请人ID</th><th>拉新人数</th><th>付费人数</th><th>充值总额</th><th>状态</th></tr></thead>
                         <tbody>
                           {bossData.employees.map((emp) => (
                             <tr key={emp.id}>
-                              <td>{emp.name}</td><td>{emp.inviteCode}</td><td>{emp.newUsers}</td>
+                              <td>{emp.name}</td><td>{emp.inviteCode}</td><td>{emp.inviterId || '-'}</td><td>{emp.newUsers}</td>
                               <td>{emp.paidUsers}</td><td>{fmt(emp.totalAmount)}</td>
                               <td><span className={emp.status === 'active' ? 'statusActive' : 'statusDisabled'}>{emp.status === 'active' ? '正常' : '停用'}</span></td>
                             </tr>
@@ -259,6 +262,7 @@ export default function DashboardPage() {
                     <div className="profileGrid">
                       <article className="profileCard"><span>员工姓名</span><strong>{staffData.profile.name}</strong></article>
                       <article className="profileCard"><span>邀请码</span><strong>{staffData.profile.inviteCode}</strong></article>
+                      <article className="profileCard"><span>邀请人ID</span><strong>{staffData.profile.inviterId || '-'}</strong></article>
                       <article className="profileCard"><span>账号状态</span><strong>{staffData.profile.status === 'active' ? '正常' : '停用'}</strong></article>
                       <article className="profileCard"><span>登录账号</span><strong>{staffData.currentUser.username}</strong></article>
                     </div>
@@ -288,6 +292,9 @@ export default function DashboardPage() {
                           <label className="field"><span>初始密码</span><input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="至少 6 位" minLength={6} required /></label>
                           <label className="field"><span>邀请码</span><input value={newInviteCode} onChange={(e) => setNewInviteCode(e.target.value)} placeholder="例：ZHANG2024" required /></label>
                         </div>
+                        <div className="formRow">
+                          <label className="field"><span>邀请人ID</span><input value={newInviterId} onChange={(e) => setNewInviterId(e.target.value)} placeholder="例：156938339" /></label>
+                        </div>
                         {formError && <p className="formError">{formError}</p>}
                         <div className="formActions">
                           <button type="submit" className="submitBtn" disabled={formLoading}>{formLoading ? '创建中...' : '确认创建'}</button>
@@ -298,11 +305,11 @@ export default function DashboardPage() {
 
                     <div className="tableWrap">
                       <table className="dataTable">
-                        <thead><tr><th>员工姓名</th><th>邀请码</th><th>拉新人数</th><th>付费人数</th><th>充值总额</th><th>状态</th><th>操作</th></tr></thead>
+                        <thead><tr><th>员工姓名</th><th>邀请码</th><th>邀请人ID</th><th>拉新人数</th><th>付费人数</th><th>充值总额</th><th>状态</th><th>操作</th></tr></thead>
                         <tbody>
                           {bossData?.employees.map((emp) => (
                             <tr key={emp.id}>
-                              <td>{emp.name}</td><td>{emp.inviteCode}</td><td>{emp.newUsers}</td>
+                              <td>{emp.name}</td><td>{emp.inviteCode}</td><td>{emp.inviterId || '-'}</td><td>{emp.newUsers}</td>
                               <td>{emp.paidUsers}</td><td>{fmt(emp.totalAmount)}</td>
                               <td><span className={emp.status === 'active' ? 'statusActive' : 'statusDisabled'}>{emp.status === 'active' ? '正常' : '停用'}</span></td>
                               <td>
@@ -322,6 +329,10 @@ export default function DashboardPage() {
                     <div className="inviteCodeBox">
                       <span className="inviteCodeLabel">我的专属邀请码</span>
                       <strong className="inviteCodeValue">{staffData.profile.inviteCode}</strong>
+                    </div>
+                    <div className="inviteCodeBox">
+                      <span className="inviteCodeLabel">邀请人ID</span>
+                      <strong className="inviteCodeValue">{staffData.profile.inviterId || '-'}</strong>
                     </div>
                   </>
                 ) : null}

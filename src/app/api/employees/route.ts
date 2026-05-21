@@ -26,6 +26,7 @@ type EmployeeRow = {
   account_id: string;
   employee_name: string;
   invite_code: string;
+  inviter_id?: string | null;
   status: string;
 };
 
@@ -78,7 +79,7 @@ export async function GET(request: Request) {
     const [employeesResult, attributionsResult, rechargesResult] = await Promise.all([
       supabaseServer
         .from('employees')
-        .select('id, account_id, employee_name, invite_code, status')
+        .select('id, account_id, employee_name, invite_code, inviter_id, status')
         .eq('company_id', requesterCompanyId)
         .order('created_at', { ascending: true }),
       supabaseServer
@@ -108,6 +109,7 @@ export async function GET(request: Request) {
         id: employee.id,
         name: employee.employee_name,
         inviteCode: employee.invite_code,
+        inviterId: employee.inviter_id ?? null,
         status: employee.status,
         ...summary
       };
@@ -129,9 +131,10 @@ export async function POST(request: Request) {
       username?: string;
       password?: string;
       inviteCode?: string;
+      inviterId?: string;
     };
 
-    const { requesterId, requesterCompanyId, requesterRole, employeeName, username, password, inviteCode } = body;
+    const { requesterId, requesterCompanyId, requesterRole, employeeName, username, password, inviteCode, inviterId } = body;
 
     if (!requesterId || !requesterCompanyId || !requesterRole) {
       return NextResponse.json({ error: '缺少身份信息' }, { status: 401 });
@@ -165,6 +168,22 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: '该邀请码已被使用' }, { status: 409 });
     }
 
+    const inviterIdValue = (inviterId ?? '').trim();
+    if (inviterIdValue && !/^\d+$/.test(inviterIdValue)) {
+      return NextResponse.json({ error: '邀请人ID 必须是纯数字' }, { status: 400 });
+    }
+    if (inviterIdValue) {
+      const { data: existingInviter } = await supabaseServer
+        .from('employees')
+        .select('id')
+        .eq('company_id', requesterCompanyId)
+        .eq('inviter_id', inviterIdValue)
+        .maybeSingle();
+      if (existingInviter) {
+        return NextResponse.json({ error: '该邀请人ID 已被使用' }, { status: 409 });
+      }
+    }
+
     const passwordHash = password;
 
     const { data: newAccount, error: accountError } = await supabaseServer
@@ -191,6 +210,7 @@ export async function POST(request: Request) {
         account_id: newAccount.id,
         employee_name: employeeName,
         invite_code: inviteCode,
+        inviter_id: inviterIdValue || null,
         status: 'active'
       });
 

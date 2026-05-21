@@ -70,7 +70,13 @@ function writeJsonFile(filePath, value) {
 async function fetchAllEmployees(supabase) {
   const pageSize = 1000;
   const employees = [];
-  let selectColumns = 'id, company_id, invite_code, attribution_key';
+  const selectCandidates = [
+    'id, company_id, invite_code, inviter_id, attribution_key',
+    'id, company_id, invite_code, inviter_id',
+    'id, company_id, invite_code, attribution_key',
+    'id, company_id, invite_code'
+  ];
+  let selectColumns = selectCandidates[0];
   let from = 0;
   while (true) {
     const to = from + pageSize - 1;
@@ -83,13 +89,29 @@ async function fetchAllEmployees(supabase) {
       .order('id', { ascending: true })
       .range(from, to));
 
-    if (error && String(error.message || '').toLowerCase().includes('attribution_key')) {
-      selectColumns = 'id, company_id, invite_code';
-      ({ data, error } = await supabase
-        .from('employees')
-        .select(selectColumns)
-        .order('id', { ascending: true })
-        .range(from, to));
+    if (error) {
+      const message = String(error.message || '').toLowerCase();
+      const next = selectCandidates.find((candidate) => candidate !== selectColumns && !message.includes('column'));
+      if (next) {
+        selectColumns = next;
+        ({ data, error } = await supabase
+          .from('employees')
+          .select(selectColumns)
+          .order('id', { ascending: true })
+          .range(from, to));
+      } else {
+        for (const candidate of selectCandidates) {
+          ({ data, error } = await supabase
+            .from('employees')
+            .select(candidate)
+            .order('id', { ascending: true })
+            .range(from, to));
+          if (!error) {
+            selectColumns = candidate;
+            break;
+          }
+        }
+      }
     }
 
     if (error) throw error;
@@ -161,6 +183,8 @@ async function main() {
     for (const employee of employees ?? []) {
       const inviteCodeKey = normalizeInviteCode(employee.invite_code);
       if (inviteCodeKey) employeeByInviteCode.set(inviteCodeKey, employee);
+      const inviterIdKey = normalizeInviteCode(employee.inviter_id);
+      if (inviterIdKey) employeeByInviteCode.set(inviterIdKey, employee);
       const attributionKey = normalizeInviteCode(employee.attribution_key);
       if (attributionKey) employeeByInviteCode.set(attributionKey, employee);
     }

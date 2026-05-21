@@ -17,6 +17,7 @@ type EmployeeRow = {
   account_id: string;
   employee_name: string;
   invite_code: string;
+  inviter_id?: string | null;
   status: string;
 };
 
@@ -118,7 +119,7 @@ export async function POST(request: Request) {
       const [employeesResult, attributionsResult, rechargesResult] = await Promise.all([
         supabaseServer
           .from('employees')
-          .select('id, account_id, employee_name, invite_code, status')
+          .select('id, account_id, employee_name, invite_code, inviter_id, status')
           .eq('company_id', companyId)
           .order('created_at', { ascending: true }),
         supabaseServer
@@ -142,7 +143,7 @@ export async function POST(request: Request) {
         const employeeUsers = attributions.filter((item) => item.employee_id === employee.id);
         const employeeOrders = recharges.filter((item) => item.employee_id === employee.id);
         const employeeSummary = buildSummary(employeeUsers, employeeOrders);
-        return { id: employee.id, name: employee.employee_name, inviteCode: employee.invite_code, status: employee.status, ...employeeSummary };
+        return { id: employee.id, name: employee.employee_name, inviteCode: employee.invite_code, inviterId: employee.inviter_id ?? null, status: employee.status, ...employeeSummary };
       });
 
       const employeeMap = new Map(employees.map((item) => [item.id, item]));
@@ -176,7 +177,7 @@ export async function POST(request: Request) {
     // staff
     const { data: employee, error: employeeError } = await supabaseServer
       .from('employees')
-      .select('id, account_id, employee_name, invite_code, status')
+      .select('id, account_id, employee_name, invite_code, inviter_id, status')
       .eq('company_id', companyId)
       .eq('account_id', userId)
       .single();
@@ -232,7 +233,7 @@ export async function POST(request: Request) {
       role,
       currentUser: { name: account.name, username: account.username },
       summary,
-      profile: { name: employee.employee_name, inviteCode: employee.invite_code, status: employee.status },
+      profile: { name: employee.employee_name, inviteCode: employee.invite_code, inviterId: employee.inviter_id ?? null, status: employee.status },
       users
     });
   } catch (error) {

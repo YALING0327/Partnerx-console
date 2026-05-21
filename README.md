@@ -48,8 +48,8 @@ SELECTDB_PORT=9030
 SELECTDB_USER=
 SELECTDB_PASSWORD=
 SELECTDB_DATABASE=prod
-SELECTDB_ATTRIBUTION_SQL=SELECT properties['sponsor'] AS invite_code, id AS platform_user_id, create_time AS bind_time FROM `user` WHERE properties['sponsor'] IS NOT NULL AND properties['sponsor'] != ''
-SELECTDB_RECHARGE_SQL=SELECT order_no AS order_no, user_id AS platform_user_id, user['sponsor'] AS invite_code, amount AS amount, pay_time AS pay_time, status AS status FROM recharge WHERE user['sponsor'] IS NOT NULL AND user['sponsor'] != ''
+SELECTDB_ATTRIBUTION_SQL=SELECT TRIM(CAST(properties['sponsor'] AS STRING)) AS invite_code, account_id AS platform_user_id, event_created_time AS bind_time FROM `user` WHERE properties['sponsor'] IS NOT NULL AND TRIM(CAST(properties['sponsor'] AS STRING)) != ''
+SELECTDB_RECHARGE_SQL=SELECT id AS order_no, account_id AS platform_user_id, TRIM(CAST(user['sponsor'] AS STRING)) AS invite_code, COALESCE(properties['amount'], properties['money'], properties['price'], properties['pay_amount'], properties['usd_amount'], 0) AS amount, event_created_time AS pay_time, 'success' AS status FROM recharge WHERE user['sponsor'] IS NOT NULL AND TRIM(CAST(user['sponsor'] AS STRING)) != ''
 ```
 
 ### 3. SQL 必须返回这些别名
@@ -75,6 +75,8 @@ SELECTDB_RECHARGE_SQL=SELECT order_no AS order_no, user_id AS platform_user_id, 
 - 充值侧的邀请码来源：`recharge.user['sponsor']`
 - 控制台真正做匹配时，还是按 `invite_code -> employees.invite_code` 来归因
 - 充值最终会优先按 `platform_user_id` 对应已归因用户，匹配不到时再按 `invite_code` 兜底归因
+
+如果你实际发现 `sponsor` 存的是“邀请人ID”（纯数字）而不是“邀请码字符串”，建议在 `employees` 表里新增一列 `inviter_id` 保存这个数字，并让脚本用 `invite_code -> employees.inviter_id` 来匹配。
 
 也就是说：
 
