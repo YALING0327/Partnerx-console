@@ -45,6 +45,10 @@ function normalizeText(value) {
   return String(value ?? '').trim();
 }
 
+function normalizeInviteCode(value) {
+  return normalizeText(value).toLowerCase();
+}
+
 function stripTrailingSemicolon(sql) {
   return String(sql ?? '').trim().replace(/;+\s*$/g, '');
 }
@@ -141,7 +145,7 @@ async function main() {
 
     const employees = await fetchAllEmployees(supabase);
     const employeeByInviteCode = new Map(
-      (employees ?? []).map((item) => [String(item.invite_code).trim(), item])
+      (employees ?? []).map((item) => [normalizeInviteCode(item.invite_code), item])
     );
 
     const attributionCache = new Map();
@@ -155,7 +159,7 @@ async function main() {
     let attributionHit = 0;
     while (true) {
       const sql = `
-        SELECT *
+        SELECT t.invite_code, t.platform_user_id, t.bind_time
         FROM (${attributionSql}) t
         WHERE (t.bind_time > ?) OR (t.bind_time = ? AND t.platform_user_id > ?)
         ORDER BY t.bind_time ASC, t.platform_user_id ASC
@@ -174,7 +178,7 @@ async function main() {
 
       const batchUpserts = [];
       for (const row of rows) {
-        const inviteCode = normalizeText(row.invite_code);
+        const inviteCode = normalizeInviteCode(row.invite_code);
         const platformUserId = normalizeText(row.platform_user_id);
         if (!inviteCode || !platformUserId) continue;
 
@@ -229,7 +233,7 @@ async function main() {
     let rechargeHit = 0;
     while (true) {
       const sql = `
-        SELECT *
+        SELECT t.order_no, t.platform_user_id, t.invite_code, t.amount, t.pay_time, t.status
         FROM (${rechargeSql}) t
         WHERE (t.pay_time > ?) OR (t.pay_time = ? AND t.order_no > ?)
         ORDER BY t.pay_time ASC, t.order_no ASC
@@ -263,7 +267,7 @@ async function main() {
       for (const row of rows) {
         const platformUserId = normalizeText(row.platform_user_id);
         const orderNo = normalizeText(row.order_no);
-        const inviteCode = normalizeText(row.invite_code);
+        const inviteCode = normalizeInviteCode(row.invite_code);
         if (!platformUserId || !orderNo) continue;
 
         const attribution = attributionCache.get(platformUserId);
