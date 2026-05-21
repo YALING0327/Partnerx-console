@@ -132,6 +132,7 @@ async function main() {
   }
   const debugInviteKey = normalizeInviteCode(process.env.DEBUG_INVITE_KEY);
   const debugEnabled = process.env.DEBUG_MATCH === '1' && !!debugInviteKey;
+  const inviteFilterLimit = Number(process.env.SELECTDB_INVITE_FILTER_LIMIT || 2000);
 
   const realtimeOptions = {};
   if (typeof globalThis.WebSocket === 'undefined') {
@@ -183,6 +184,8 @@ async function main() {
       const attributionKey = normalizeInviteCode(employee.attribution_key);
       if (attributionKey) employeeByInviteCode.set(attributionKey, employee);
     }
+    const employeeInviteKeys = [...new Set([...employeeByInviteCode.keys()].filter(Boolean))];
+    const useInviteFilter = employeeInviteKeys.length > 0 && employeeInviteKeys.length <= inviteFilterLimit;
     if (debugEnabled) {
       console.log(`DEBUG_MATCH employee keys: total=${employeeByInviteCode.size}`);
       console.log(`DEBUG_MATCH employee has ${debugInviteKey}: ${employeeByInviteCode.has(debugInviteKey)}`);
@@ -198,17 +201,22 @@ async function main() {
     let attributionRead = 0;
     let attributionHit = 0;
     while (true) {
+      const inviteFilterSql = useInviteFilter
+        ? ` AND t.invite_code IN (${employeeInviteKeys.map(() => '?').join(',')})`
+        : '';
       const sql = `
         SELECT t.invite_code, t.platform_user_id, t.bind_time
         FROM (${attributionSql}) t
         WHERE (t.bind_time > ?) OR (t.bind_time = ? AND t.platform_user_id > ?)
+        ${inviteFilterSql}
         ORDER BY t.bind_time ASC, t.platform_user_id ASC
         LIMIT ${batchSize}
       `;
       const [rowsRaw] = await connection.query(sql, [
         attributionKeyset.bind_time,
         attributionKeyset.bind_time,
-        attributionKeyset.platform_user_id
+        attributionKeyset.platform_user_id,
+        ...(useInviteFilter ? employeeInviteKeys : [])
       ]);
       const rows = Array.isArray(rowsRaw) ? rowsRaw : [];
       if (rows.length === 0) break;
@@ -277,17 +285,22 @@ async function main() {
     let rechargeRead = 0;
     let rechargeHit = 0;
     while (true) {
+      const inviteFilterSql = useInviteFilter
+        ? ` AND t.invite_code IN (${employeeInviteKeys.map(() => '?').join(',')})`
+        : '';
       const sql = `
         SELECT t.order_no, t.platform_user_id, t.invite_code, t.amount, t.pay_time, t.status
         FROM (${rechargeSql}) t
         WHERE (t.pay_time > ?) OR (t.pay_time = ? AND t.order_no > ?)
+        ${inviteFilterSql}
         ORDER BY t.pay_time ASC, t.order_no ASC
         LIMIT ${batchSize}
       `;
       const [rowsRaw] = await connection.query(sql, [
         rechargeKeyset.pay_time,
         rechargeKeyset.pay_time,
-        rechargeKeyset.order_no
+        rechargeKeyset.order_no,
+        ...(useInviteFilter ? employeeInviteKeys : [])
       ]);
       const rows = Array.isArray(rowsRaw) ? rowsRaw : [];
       if (rows.length === 0) break;
