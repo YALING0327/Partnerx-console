@@ -214,8 +214,8 @@ async function main() {
     while (true) {
       const inviteFilterSql = useInviteFilter
         ? inviteFilterKeys.length === 1
-          ? ' AND t.invite_code = ?'
-          : ` AND t.invite_code IN (${inviteFilterKeys.map(() => '?').join(',')})`
+          ? ` AND t.invite_code = ${mysql.escape(inviteFilterKeys[0])}`
+          : ` AND t.invite_code IN (${inviteFilterKeys.map(k => mysql.escape(k)).join(',')})`
         : '';
       const sql = `
         SELECT t.invite_code, t.platform_user_id, t.bind_time
@@ -228,8 +228,7 @@ async function main() {
       const [rowsRaw] = await connection.query(sql, [
         attributionKeyset.bind_time,
         attributionKeyset.bind_time,
-        attributionKeyset.platform_user_id,
-        ...(useInviteFilter ? inviteFilterKeys : [])
+        attributionKeyset.platform_user_id
       ]);
       const rows = Array.isArray(rowsRaw) ? rowsRaw : [];
       if (rows.length === 0) break;
@@ -300,8 +299,8 @@ async function main() {
     while (true) {
       const inviteFilterSql = useInviteFilter
         ? inviteFilterKeys.length === 1
-          ? ' AND t.invite_code = ?'
-          : ` AND t.invite_code IN (${inviteFilterKeys.map(() => '?').join(',')})`
+          ? ` AND t.invite_code = ${mysql.escape(inviteFilterKeys[0])}`
+          : ` AND t.invite_code IN (${inviteFilterKeys.map(k => mysql.escape(k)).join(',')})`
         : '';
       const sql = `
         SELECT t.order_no, t.platform_user_id, t.invite_code, t.amount, t.pay_time, t.status
@@ -314,8 +313,7 @@ async function main() {
       const [rowsRaw] = await connection.query(sql, [
         rechargeKeyset.pay_time,
         rechargeKeyset.pay_time,
-        rechargeKeyset.order_no,
-        ...(useInviteFilter ? inviteFilterKeys : [])
+        rechargeKeyset.order_no
       ]);
       const rows = Array.isArray(rowsRaw) ? rowsRaw : [];
       if (rows.length === 0) break;
