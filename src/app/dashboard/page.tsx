@@ -53,7 +53,8 @@ type DashboardData =
 type View = 'home' | 'employees' | 'users';
 
 function fmt(value: number) {
-  return new Intl.NumberFormat('zh-CN', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 }).format(value || 0);
+  const dollars = (Number(value || 0) || 0) / 100;
+  return new Intl.NumberFormat('zh-CN', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(dollars);
 }
 
 function fmtDate(value: string | null) {
@@ -345,7 +346,7 @@ export default function DashboardPage() {
                 <div className="sectionHead">
                   <div><p className="sectionLabel">用户明细</p><h2>{isBoss ? '团队归因用户充值表现' : '我拉来的用户及充值表现'}</h2></div>
                   <button className="addBtn" onClick={() => {
-                    const rows = data.users.map((u) => [u.platformUserId, u.employeeName, u.inviteCode, fmtDate(u.bindTime), fmtDate(u.firstRechargeAt), String(u.rechargeCount), String(u.totalAmount), fmtDate(u.lastRechargeAt)]);
+                    const rows = data.users.map((u) => [u.platformUserId, u.employeeName, u.inviteCode, fmtDate(u.bindTime), fmtDate(u.firstRechargeAt), String(u.rechargeCount), String((Number(u.totalAmount || 0) / 100).toFixed(2)), fmtDate(u.lastRechargeAt)]);
                     exportCsv('用户业绩明细.csv', rows, ['用户ID', '归因员工', '邀请码', '绑定时间', '首次充值时间', '充值笔数', '累计充值', '最近充值时间']);
                   }}>导出 CSV</button>
                 </div>
