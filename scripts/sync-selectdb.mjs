@@ -133,6 +133,7 @@ async function main() {
   const debugInviteKey = normalizeInviteCode(process.env.DEBUG_INVITE_KEY);
   const debugEnabled = process.env.DEBUG_MATCH === '1' && !!debugInviteKey;
   const inviteFilterLimit = Number(process.env.SELECTDB_INVITE_FILTER_LIMIT || 2000);
+  const onlyInviteKey = normalizeInviteCode(process.env.SELECTDB_ONLY_INVITE_KEY);
 
   const realtimeOptions = {};
   if (typeof globalThis.WebSocket === 'undefined') {
@@ -185,10 +186,16 @@ async function main() {
       if (attributionKey) employeeByInviteCode.set(attributionKey, employee);
     }
     const employeeInviteKeys = [...new Set([...employeeByInviteCode.keys()].filter(Boolean))];
-    const useInviteFilter = employeeInviteKeys.length > 0 && employeeInviteKeys.length <= inviteFilterLimit;
+    const inviteFilterKeys = onlyInviteKey
+      ? [onlyInviteKey]
+      : (employeeInviteKeys.length > 0 && employeeInviteKeys.length <= inviteFilterLimit ? employeeInviteKeys : []);
+    const useInviteFilter = inviteFilterKeys.length > 0;
     if (debugEnabled) {
       console.log(`DEBUG_MATCH employee keys: total=${employeeByInviteCode.size}`);
       console.log(`DEBUG_MATCH employee has ${debugInviteKey}: ${employeeByInviteCode.has(debugInviteKey)}`);
+    }
+    if (onlyInviteKey) {
+      console.log(`仅同步指定 sponsor key: ${onlyInviteKey}`);
     }
 
     const attributionCache = new Map();
@@ -216,7 +223,7 @@ async function main() {
         attributionKeyset.bind_time,
         attributionKeyset.bind_time,
         attributionKeyset.platform_user_id,
-        ...(useInviteFilter ? employeeInviteKeys : [])
+        ...(useInviteFilter ? inviteFilterKeys : [])
       ]);
       const rows = Array.isArray(rowsRaw) ? rowsRaw : [];
       if (rows.length === 0) break;
@@ -300,7 +307,7 @@ async function main() {
         rechargeKeyset.pay_time,
         rechargeKeyset.pay_time,
         rechargeKeyset.order_no,
-        ...(useInviteFilter ? employeeInviteKeys : [])
+        ...(useInviteFilter ? inviteFilterKeys : [])
       ]);
       const rows = Array.isArray(rowsRaw) ? rowsRaw : [];
       if (rows.length === 0) break;
