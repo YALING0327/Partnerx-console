@@ -70,14 +70,27 @@ function writeJsonFile(filePath, value) {
 async function fetchAllEmployees(supabase) {
   const pageSize = 1000;
   const employees = [];
+  let selectColumns = 'id, company_id, invite_code, attribution_key';
   let from = 0;
   while (true) {
     const to = from + pageSize - 1;
-    const { data, error } = await supabase
+    let data;
+    let error;
+
+    ({ data, error } = await supabase
       .from('employees')
-      .select('id, company_id, invite_code')
+      .select(selectColumns)
       .order('id', { ascending: true })
-      .range(from, to);
+      .range(from, to));
+
+    if (error && String(error.message || '').toLowerCase().includes('attribution_key')) {
+      selectColumns = 'id, company_id, invite_code';
+      ({ data, error } = await supabase
+        .from('employees')
+        .select(selectColumns)
+        .order('id', { ascending: true })
+        .range(from, to));
+    }
 
     if (error) throw error;
     if (!data || data.length === 0) break;
@@ -144,9 +157,13 @@ async function main() {
     console.log('开始读取 SelectDB 数据...');
 
     const employees = await fetchAllEmployees(supabase);
-    const employeeByInviteCode = new Map(
-      (employees ?? []).map((item) => [normalizeInviteCode(item.invite_code), item])
-    );
+    const employeeByInviteCode = new Map();
+    for (const employee of employees ?? []) {
+      const inviteCodeKey = normalizeInviteCode(employee.invite_code);
+      if (inviteCodeKey) employeeByInviteCode.set(inviteCodeKey, employee);
+      const attributionKey = normalizeInviteCode(employee.attribution_key);
+      if (attributionKey) employeeByInviteCode.set(attributionKey, employee);
+    }
 
     const attributionCache = new Map();
 
@@ -190,7 +207,7 @@ async function main() {
           company_id: employee.company_id,
           employee_id: employee.id,
           platform_user_id: platformUserId,
-          invite_code: inviteCode,
+          invite_code: employee.invite_code,
           bind_time: toIso(row.bind_time),
           bind_status: 'bound'
         });
