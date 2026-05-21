@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { getStoredLang, setStoredLang, t, type Lang } from '@/lib/i18n';
 
 type LoginResponse = { message: string; user: { id: string; companyId: string; role: 'boss' | 'staff'; username: string; name: string | null } } | { error: string };
 
@@ -11,10 +12,15 @@ export default function HomePage() {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [lang, setLang] = useState<Lang>('zh');
 
   useEffect(() => {
     if (localStorage.getItem('partnerx_user')) router.replace('/dashboard');
   }, [router]);
+
+  useEffect(() => {
+    setLang(getStoredLang());
+  }, []);
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -28,7 +34,7 @@ export default function HomePage() {
       });
       const data = await res.json() as LoginResponse;
       if (!res.ok) {
-        setError('error' in data ? data.error : '登录失败');
+        setError('error' in data ? data.error : t(lang, 'login_failed'));
         return;
       }
       if ('user' in data) {
@@ -36,7 +42,7 @@ export default function HomePage() {
         router.push('/dashboard');
       }
     } catch {
-      setError('网络错误，请稍后重试');
+      setError(t(lang, 'network_error'));
     } finally {
       setLoading(false);
     }
@@ -44,21 +50,36 @@ export default function HomePage() {
 
   return (
     <main className="loginPage">
+      <div className="loginLang">
+        <select
+          className="langSelect"
+          value={lang}
+          onChange={(e) => {
+            const next = (e.target.value === 'en' ? 'en' : 'zh') as Lang;
+            setLang(next);
+            setStoredLang(next);
+          }}
+          aria-label={t(lang, 'language')}
+        >
+          <option value="zh">{t(lang, 'lang_zh')}</option>
+          <option value="en">{t(lang, 'lang_en')}</option>
+        </select>
+      </div>
       <div className="loginBox">
         <h1 className="loginBrand">PARTNERX</h1>
-        <p className="loginSubtitle">伙伴增长控制台</p>
+        <p className="loginSubtitle">{t(lang, 'login_title')}</p>
         <form onSubmit={handleSubmit}>
           <label className="field">
-            <span>账号</span>
-            <input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="请输入账号" required />
+            <span>{t(lang, 'login_username')}</span>
+            <input value={username} onChange={(e) => setUsername(e.target.value)} placeholder={t(lang, 'login_username_placeholder')} required />
           </label>
           <label className="field">
-            <span>密码</span>
-            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="请输入密码" required />
+            <span>{t(lang, 'login_password')}</span>
+            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder={t(lang, 'login_password_placeholder')} required />
           </label>
           {error && <p className="loginError">{error}</p>}
           <button className="submitBtn" type="submit" disabled={loading}>
-            {loading ? '登录中...' : '登录'}
+            {loading ? t(lang, 'login_loading') : t(lang, 'login_submit')}
           </button>
         </form>
       </div>

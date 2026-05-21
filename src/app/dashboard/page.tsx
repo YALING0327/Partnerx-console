@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
+import { getStoredLang, langLocale, setStoredLang, t, type Lang } from '@/lib/i18n';
 
 type StoredUser = {
   id: string;
@@ -52,14 +53,14 @@ type DashboardData =
 
 type View = 'home' | 'employees' | 'users';
 
-function fmt(value: number) {
+function fmt(value: number, lang: Lang) {
   const dollars = (Number(value || 0) || 0) / 100;
-  return new Intl.NumberFormat('zh-CN', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(dollars);
+  return new Intl.NumberFormat(langLocale(lang), { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(dollars);
 }
 
-function fmtDate(value: string | null) {
+function fmtDate(value: string | null, lang: Lang) {
   if (!value) return '-';
-  return new Date(value).toLocaleString('zh-CN', { hour12: false });
+  return new Date(value).toLocaleString(langLocale(lang), { hour12: false });
 }
 
 function exportCsv(filename: string, rows: string[][], headers: string[]) {
@@ -80,6 +81,7 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [data, setData] = useState<DashboardData | null>(null);
+  const [lang, setLang] = useState<Lang>('zh');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [filterEmployee, setFilterEmployee] = useState('');
@@ -100,6 +102,10 @@ export default function DashboardPage() {
     setUser(JSON.parse(raw) as StoredUser);
   }, [router]);
 
+  useEffect(() => {
+    setLang(getStoredLang());
+  }, []);
+
   const loadDashboard = useCallback(async (u: StoredUser, sd: string, ed: string) => {
     setLoading(true);
     setError('');
@@ -110,14 +116,14 @@ export default function DashboardPage() {
         body: JSON.stringify({ ...u, userId: u.id, companyId: u.companyId, startDate: sd || undefined, endDate: ed || undefined })
       });
       const result = await res.json() as DashboardData | { error: string };
-      if (!res.ok) { setError('error' in result ? result.error : '加载失败'); return; }
+      if (!res.ok) { setError('error' in result ? result.error : t(lang, 'load_failed')); return; }
       setData(result as DashboardData);
     } catch (e) {
-      setError(e instanceof Error ? e.message : '加载失败');
+      setError(e instanceof Error ? e.message : t(lang, 'load_failed'));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [lang]);
 
   useEffect(() => {
     if (user) void loadDashboard(user, startDate, endDate);
@@ -178,14 +184,14 @@ export default function DashboardPage() {
   const staffData = data?.role === 'staff' ? data : null;
 
   const navItems: { key: View; label: string }[] = isBoss
-    ? [{ key: 'home', label: '首页' }, { key: 'employees', label: '员工与邀请码' }, { key: 'users', label: '用户业绩明细' }]
-    : [{ key: 'home', label: '首页' }, { key: 'employees', label: '我的邀请码' }, { key: 'users', label: '用户业绩明细' }];
+    ? [{ key: 'home', label: t(lang, 'nav_home') }, { key: 'employees', label: t(lang, 'nav_employees') }, { key: 'users', label: t(lang, 'nav_users') }]
+    : [{ key: 'home', label: t(lang, 'nav_home') }, { key: 'employees', label: t(lang, 'nav_my_invite') }, { key: 'users', label: t(lang, 'nav_users') }];
 
   const pageTitle = view === 'home'
-    ? (isBoss ? '老板端业绩总览' : '员工端个人业绩')
+    ? (isBoss ? t(lang, 'title_boss_home') : t(lang, 'title_staff_home'))
     : view === 'employees'
-    ? (isBoss ? '员工与邀请码' : '我的邀请码')
-    : '用户业绩明细';
+    ? (isBoss ? t(lang, 'title_employees') : t(lang, 'title_my_invite'))
+    : t(lang, 'title_users');
 
   return (
     <main className="dashboardPage">
@@ -194,7 +200,7 @@ export default function DashboardPage() {
           <div className="sidebarLogo">PX</div>
           <div>
             <strong>PARTNERX</strong>
-            <p>伙伴增长控制台</p>
+            <p>{t(lang, 'login_title')}</p>
           </div>
         </div>
         <nav className="sidebarNav">
@@ -209,46 +215,59 @@ export default function DashboardPage() {
       <section className="dashboardMain">
         <header className="dashboardHeader">
           <div>
-            <p className="dashboardBreadcrumb">首页 / 伙伴增长控制台</p>
+            <p className="dashboardBreadcrumb">{t(lang, 'breadcrumb')}</p>
             <h1 className="dashboardTitle">{pageTitle}</h1>
           </div>
           <div className="dashboardActions">
-            <span className="roleTag">{isBoss ? '企业管理员' : '员工'}</span>
-            <button className="logoutBtn" onClick={handleLogout}>退出登录</button>
+            <select
+              className="langSelect"
+              value={lang}
+              onChange={(e) => {
+                const next = (e.target.value === 'en' ? 'en' : 'zh') as Lang;
+                setLang(next);
+                setStoredLang(next);
+              }}
+              aria-label={t(lang, 'language')}
+            >
+              <option value="zh">{t(lang, 'lang_zh')}</option>
+              <option value="en">{t(lang, 'lang_en')}</option>
+            </select>
+            <span className="roleTag">{isBoss ? t(lang, 'role_boss') : t(lang, 'role_staff')}</span>
+            <button className="logoutBtn" onClick={handleLogout}>{t(lang, 'logout')}</button>
           </div>
         </header>
 
         {loading ? (
-          <section className="loadingCard">正在加载数据...</section>
+          <section className="loadingCard">{t(lang, 'loading')}</section>
         ) : error ? (
-          <section className="loadingCard">加载失败：{error}</section>
+          <section className="loadingCard">{t(lang, 'load_failed')}：{error}</section>
         ) : !data ? null : (
           <>
             {/* HOME VIEW */}
             {view === 'home' && (
               <>
                 <section className="statsGrid">
-                  <article className="statCard"><span>拉新总人数</span><strong>{data.summary.newUsers}</strong></article>
-                  <article className="statCard"><span>总付费人数</span><strong>{data.summary.paidUsers}</strong></article>
-                  <article className="statCard"><span>充值总金额</span><strong>{fmt(data.summary.totalAmount)}</strong></article>
-                  <article className="statCard"><span>ARPPU</span><strong>{fmt(data.summary.arppu)}</strong></article>
-                  {bossData && <article className="statCard"><span>团队人数</span><strong>{bossData.summary.employeeCount}</strong></article>}
+                  <article className="statCard"><span>{t(lang, 'stat_new_users')}</span><strong>{data.summary.newUsers}</strong></article>
+                  <article className="statCard"><span>{t(lang, 'stat_paid_users')}</span><strong>{data.summary.paidUsers}</strong></article>
+                  <article className="statCard"><span>{t(lang, 'stat_total_amount')}</span><strong>{fmt(data.summary.totalAmount, lang)}</strong></article>
+                  <article className="statCard"><span>{t(lang, 'stat_arppu')}</span><strong>{fmt(data.summary.arppu, lang)}</strong></article>
+                  {bossData && <article className="statCard"><span>{t(lang, 'stat_employee_count')}</span><strong>{bossData.summary.employeeCount}</strong></article>}
                 </section>
 
                 {bossData && (
                   <section className="dashboardSection">
                     <div className="sectionHead">
-                      <div><p className="sectionLabel">团队概览</p><h2>员工与邀请码表现</h2></div>
+                      <div><p className="sectionLabel">{t(lang, 'section_team_overview')}</p><h2>{t(lang, 'section_employee_performance')}</h2></div>
                     </div>
                     <div className="tableWrap">
                       <table className="dataTable">
-                        <thead><tr><th>员工</th><th>邀请码</th><th>邀请人ID</th><th>拉新人数</th><th>付费人数</th><th>充值总额</th><th>状态</th></tr></thead>
+                        <thead><tr><th>{t(lang, 'th_employee')}</th><th>{t(lang, 'th_invite_code')}</th><th>{t(lang, 'th_inviter_id')}</th><th>{t(lang, 'th_new_users')}</th><th>{t(lang, 'th_paid_users')}</th><th>{t(lang, 'th_total_amount')}</th><th>{t(lang, 'th_status')}</th></tr></thead>
                         <tbody>
                           {bossData.employees.map((emp) => (
                             <tr key={emp.id}>
                               <td>{emp.name}</td><td>{emp.inviteCode}</td><td>{emp.inviterId || '-'}</td><td>{emp.newUsers}</td>
-                              <td>{emp.paidUsers}</td><td>{fmt(emp.totalAmount)}</td>
-                              <td><span className={emp.status === 'active' ? 'statusActive' : 'statusDisabled'}>{emp.status === 'active' ? '正常' : '停用'}</span></td>
+                              <td>{emp.paidUsers}</td><td>{fmt(emp.totalAmount, lang)}</td>
+                              <td><span className={emp.status === 'active' ? 'statusActive' : 'statusDisabled'}>{emp.status === 'active' ? t(lang, 'status_active') : t(lang, 'status_disabled')}</span></td>
                             </tr>
                           ))}
                         </tbody>
@@ -259,13 +278,13 @@ export default function DashboardPage() {
 
                 {staffData && (
                   <section className="dashboardSection">
-                    <div className="sectionHead"><div><p className="sectionLabel">个人信息</p><h2>我的邀请码与账户状态</h2></div></div>
+                    <div className="sectionHead"><div><p className="sectionLabel">{t(lang, 'section_profile')}</p><h2>{t(lang, 'section_my_invite_profile')}</h2></div></div>
                     <div className="profileGrid">
-                      <article className="profileCard"><span>员工姓名</span><strong>{staffData.profile.name}</strong></article>
-                      <article className="profileCard"><span>邀请码</span><strong>{staffData.profile.inviteCode}</strong></article>
-                      <article className="profileCard"><span>邀请人ID</span><strong>{staffData.profile.inviterId || '-'}</strong></article>
-                      <article className="profileCard"><span>账号状态</span><strong>{staffData.profile.status === 'active' ? '正常' : '停用'}</strong></article>
-                      <article className="profileCard"><span>登录账号</span><strong>{staffData.currentUser.username}</strong></article>
+                      <article className="profileCard"><span>{t(lang, 'profile_name')}</span><strong>{staffData.profile.name}</strong></article>
+                      <article className="profileCard"><span>{t(lang, 'profile_invite_code')}</span><strong>{staffData.profile.inviteCode}</strong></article>
+                      <article className="profileCard"><span>{t(lang, 'profile_inviter_id')}</span><strong>{staffData.profile.inviterId || '-'}</strong></article>
+                      <article className="profileCard"><span>{t(lang, 'profile_account_status')}</span><strong>{staffData.profile.status === 'active' ? t(lang, 'status_active') : t(lang, 'status_disabled')}</strong></article>
+                      <article className="profileCard"><span>{t(lang, 'profile_username')}</span><strong>{staffData.currentUser.username}</strong></article>
                     </div>
                   </section>
                 )}
@@ -278,44 +297,44 @@ export default function DashboardPage() {
                 {isBoss ? (
                   <>
                     <div className="sectionHead">
-                      <div><p className="sectionLabel">员工管理</p><h2>员工列表与邀请码</h2></div>
-                      <button className="addBtn" onClick={() => { setShowAddForm(true); setFormError(''); }}>+ 新增员工</button>
+                      <div><p className="sectionLabel">{t(lang, 'section_employee_mgmt')}</p><h2>{t(lang, 'section_employee_list')}</h2></div>
+                      <button className="addBtn" onClick={() => { setShowAddForm(true); setFormError(''); }}>{t(lang, 'add_employee')}</button>
                     </div>
 
                     {showAddForm && (
                       <form className="addForm" onSubmit={(e) => void handleAddEmployee(e)}>
-                        <h3>新增员工</h3>
+                        <h3>{t(lang, 'add_employee_title')}</h3>
                         <div className="formRow">
-                          <label className="field"><span>员工姓名</span><input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="例：张三" required /></label>
-                          <label className="field"><span>登录账号</span><input value={newUsername} onChange={(e) => setNewUsername(e.target.value)} placeholder="例：staff_zhang" required /></label>
+                          <label className="field"><span>{t(lang, 'field_employee_name')}</span><input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder={t(lang, 'placeholder_employee_name')} required /></label>
+                          <label className="field"><span>{t(lang, 'field_login_username')}</span><input value={newUsername} onChange={(e) => setNewUsername(e.target.value)} placeholder={t(lang, 'placeholder_login_username')} required /></label>
                         </div>
                         <div className="formRow">
-                          <label className="field"><span>初始密码</span><input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="至少 6 位" minLength={6} required /></label>
-                          <label className="field"><span>邀请码</span><input value={newInviteCode} onChange={(e) => setNewInviteCode(e.target.value)} placeholder="例：ZHANG2024" required /></label>
+                          <label className="field"><span>{t(lang, 'field_initial_password')}</span><input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder={t(lang, 'placeholder_password')} minLength={6} required /></label>
+                          <label className="field"><span>{t(lang, 'field_invite_code')}</span><input value={newInviteCode} onChange={(e) => setNewInviteCode(e.target.value)} placeholder={t(lang, 'placeholder_invite_code')} required /></label>
                         </div>
                         <div className="formRow">
-                          <label className="field"><span>邀请人ID</span><input value={newInviterId} onChange={(e) => setNewInviterId(e.target.value)} placeholder="例：156938339" /></label>
+                          <label className="field"><span>{t(lang, 'field_inviter_id')}</span><input value={newInviterId} onChange={(e) => setNewInviterId(e.target.value)} placeholder={t(lang, 'placeholder_inviter_id')} /></label>
                         </div>
                         {formError && <p className="formError">{formError}</p>}
                         <div className="formActions">
-                          <button type="submit" className="submitBtn" disabled={formLoading}>{formLoading ? '创建中...' : '确认创建'}</button>
-                          <button type="button" className="cancelBtn" onClick={() => setShowAddForm(false)}>取消</button>
+                          <button type="submit" className="submitBtn" disabled={formLoading}>{formLoading ? t(lang, 'create_loading') : t(lang, 'create_confirm')}</button>
+                          <button type="button" className="cancelBtn" onClick={() => setShowAddForm(false)}>{t(lang, 'cancel')}</button>
                         </div>
                       </form>
                     )}
 
                     <div className="tableWrap">
                       <table className="dataTable">
-                        <thead><tr><th>员工姓名</th><th>邀请码</th><th>邀请人ID</th><th>拉新人数</th><th>付费人数</th><th>充值总额</th><th>状态</th><th>操作</th></tr></thead>
+                        <thead><tr><th>{t(lang, 'th_employee_name')}</th><th>{t(lang, 'th_invite_code')}</th><th>{t(lang, 'th_inviter_id')}</th><th>{t(lang, 'th_new_users')}</th><th>{t(lang, 'th_paid_users')}</th><th>{t(lang, 'th_total_amount')}</th><th>{t(lang, 'th_status')}</th><th>{t(lang, 'th_action')}</th></tr></thead>
                         <tbody>
                           {bossData?.employees.map((emp) => (
                             <tr key={emp.id}>
                               <td>{emp.name}</td><td>{emp.inviteCode}</td><td>{emp.inviterId || '-'}</td><td>{emp.newUsers}</td>
-                              <td>{emp.paidUsers}</td><td>{fmt(emp.totalAmount)}</td>
-                              <td><span className={emp.status === 'active' ? 'statusActive' : 'statusDisabled'}>{emp.status === 'active' ? '正常' : '停用'}</span></td>
+                              <td>{emp.paidUsers}</td><td>{fmt(emp.totalAmount, lang)}</td>
+                              <td><span className={emp.status === 'active' ? 'statusActive' : 'statusDisabled'}>{emp.status === 'active' ? t(lang, 'status_active') : t(lang, 'status_disabled')}</span></td>
                               <td>
                                 <button className="actionBtn" onClick={() => void handleToggleEmployee(emp.id, emp.status)}>
-                                  {emp.status === 'active' ? '停用' : '启用'}
+                                  {emp.status === 'active' ? t(lang, 'action_disable') : t(lang, 'action_enable')}
                                 </button>
                               </td>
                             </tr>
@@ -326,13 +345,13 @@ export default function DashboardPage() {
                   </>
                 ) : staffData ? (
                   <>
-                    <div className="sectionHead"><div><p className="sectionLabel">推广工具</p><h2>我的邀请码</h2></div></div>
+                    <div className="sectionHead"><div><p className="sectionLabel">{t(lang, 'section_tools')}</p><h2>{t(lang, 'section_my_invite')}</h2></div></div>
                     <div className="inviteCodeBox">
-                      <span className="inviteCodeLabel">我的专属邀请码</span>
+                      <span className="inviteCodeLabel">{t(lang, 'my_invite_label')}</span>
                       <strong className="inviteCodeValue">{staffData.profile.inviteCode}</strong>
                     </div>
                     <div className="inviteCodeBox">
-                      <span className="inviteCodeLabel">邀请人ID</span>
+                      <span className="inviteCodeLabel">{t(lang, 'th_inviter_id')}</span>
                       <strong className="inviteCodeValue">{staffData.profile.inviterId || '-'}</strong>
                     </div>
                   </>
@@ -344,37 +363,37 @@ export default function DashboardPage() {
             {view === 'users' && (
               <section className="dashboardSection">
                 <div className="sectionHead">
-                  <div><p className="sectionLabel">用户明细</p><h2>{isBoss ? '团队归因用户充值表现' : '我拉来的用户及充值表现'}</h2></div>
+                  <div><p className="sectionLabel">{t(lang, 'section_user_detail')}</p><h2>{isBoss ? t(lang, 'section_team_user_recharge') : t(lang, 'section_my_user_recharge')}</h2></div>
                   <button className="addBtn" onClick={() => {
-                    const rows = data.users.map((u) => [u.platformUserId, u.employeeName, u.inviteCode, fmtDate(u.bindTime), fmtDate(u.firstRechargeAt), String(u.rechargeCount), String((Number(u.totalAmount || 0) / 100).toFixed(2)), fmtDate(u.lastRechargeAt)]);
-                    exportCsv('用户业绩明细.csv', rows, ['用户ID', '归因员工', '邀请码', '绑定时间', '首次充值时间', '充值笔数', '累计充值', '最近充值时间']);
-                  }}>导出 CSV</button>
+                    const rows = data.users.map((u) => [u.platformUserId, u.employeeName, u.inviteCode, fmtDate(u.bindTime, lang), fmtDate(u.firstRechargeAt, lang), String(u.rechargeCount), String(((Number(u.totalAmount || 0) || 0) / 100).toFixed(2)), fmtDate(u.lastRechargeAt, lang)]);
+                    exportCsv(t(lang, 'export_filename'), rows, [t(lang, 'export_h_user_id'), t(lang, 'export_h_employee'), t(lang, 'export_h_invite_code'), t(lang, 'export_h_bind_time'), t(lang, 'export_h_first_recharge'), t(lang, 'export_h_recharge_count'), t(lang, 'export_h_total_amount'), t(lang, 'export_h_last_recharge')]);
+                  }}>{t(lang, 'export_csv')}</button>
                 </div>
 
                 <div className="filterRow">
-                  <label className="filterField"><span>开始日期</span><input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} /></label>
-                  <label className="filterField"><span>结束日期</span><input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} /></label>
+                  <label className="filterField"><span>{t(lang, 'filter_start')}</span><input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} /></label>
+                  <label className="filterField"><span>{t(lang, 'filter_end')}</span><input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} /></label>
                   {isBoss && bossData && (
                     <label className="filterField">
-                      <span>归因员工</span>
+                      <span>{t(lang, 'filter_employee')}</span>
                       <select className="filterSelect" value={filterEmployee} onChange={(e) => setFilterEmployee(e.target.value)}>
-                        <option value="">全部员工</option>
+                        <option value="">{t(lang, 'filter_all_employees')}</option>
                         {bossData.employees.map((emp) => (
                           <option key={emp.id} value={emp.name}>{emp.name}</option>
                         ))}
                       </select>
                     </label>
                   )}
-                  {(startDate || endDate || filterEmployee) && <button className="cancelBtn" onClick={() => { setStartDate(''); setEndDate(''); setFilterEmployee(''); }}>清除筛选</button>}
+                  {(startDate || endDate || filterEmployee) && <button className="cancelBtn" onClick={() => { setStartDate(''); setEndDate(''); setFilterEmployee(''); }}>{t(lang, 'filter_clear')}</button>}
                 </div>
 
                 <div className="tableWrap">
                   <table className="dataTable">
                     <thead>
                       <tr>
-                        <th>用户 ID</th>
-                        {isBoss && <th>归因员工</th>}
-                        <th>邀请码</th><th>绑定时间</th><th>首次充值时间</th><th>充值笔数</th><th>累计充值</th><th>最近充值时间</th>
+                        <th>{t(lang, 'export_h_user_id')}</th>
+                        {isBoss && <th>{t(lang, 'export_h_employee')}</th>}
+                        <th>{t(lang, 'export_h_invite_code')}</th><th>{t(lang, 'export_h_bind_time')}</th><th>{t(lang, 'export_h_first_recharge')}</th><th>{t(lang, 'export_h_recharge_count')}</th><th>{t(lang, 'export_h_total_amount')}</th><th>{t(lang, 'export_h_last_recharge')}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -383,12 +402,12 @@ export default function DashboardPage() {
                         <tr key={item.platformUserId}>
                           <td>{item.platformUserId}</td>
                           {isBoss && <td>{item.employeeName}</td>}
-                          <td>{item.inviteCode}</td><td>{fmtDate(item.bindTime)}</td>
-                          <td>{fmtDate(item.firstRechargeAt)}</td><td>{item.rechargeCount}</td>
-                          <td>{fmt(item.totalAmount)}</td><td>{fmtDate(item.lastRechargeAt)}</td>
+                          <td>{item.inviteCode}</td><td>{fmtDate(item.bindTime, lang)}</td>
+                          <td>{fmtDate(item.firstRechargeAt, lang)}</td><td>{item.rechargeCount}</td>
+                          <td>{fmt(item.totalAmount, lang)}</td><td>{fmtDate(item.lastRechargeAt, lang)}</td>
                         </tr>
                       )) : (
-                        <tr><td colSpan={isBoss ? 8 : 7}>暂无数据</td></tr>
+                        <tr><td colSpan={isBoss ? 8 : 7}>{t(lang, 'empty')}</td></tr>
                       )}
                     </tbody>
                   </table>
