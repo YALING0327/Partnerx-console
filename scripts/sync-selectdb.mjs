@@ -48,6 +48,12 @@ function normalizeText(value) {
 async function main() {
   const dryRun = process.env.DRY_RUN === '1';
 
+  const realtimeOptions = {};
+  if (typeof globalThis.WebSocket === 'undefined') {
+    const { default: WebSocket } = await import('ws');
+    realtimeOptions.transport = WebSocket;
+  }
+
   const supabase = createClient(
     required('NEXT_PUBLIC_SUPABASE_URL'),
     required('SUPABASE_SERVICE_ROLE_KEY'),
@@ -55,7 +61,8 @@ async function main() {
       auth: {
         autoRefreshToken: false,
         persistSession: false
-      }
+      },
+      realtime: realtimeOptions
     }
   );
 
