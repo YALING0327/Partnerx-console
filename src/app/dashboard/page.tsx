@@ -55,7 +55,7 @@ type View = 'home' | 'employees' | 'users';
 
 function fmt(value: number, lang: Lang) {
   const dollars = (Number(value || 0) || 0) / 100;
-  return new Intl.NumberFormat(langLocale(lang), { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(dollars);
+  return new Intl.NumberFormat(langLocale(lang), { style: 'currency', currency: 'USD', currencyDisplay: 'narrowSymbol', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(dollars);
 }
 
 function fmtDate(value: string | null, lang: Lang) {
@@ -269,7 +269,7 @@ export default function DashboardPage() {
             {/* HOME VIEW */}
             {view === 'home' && (
               <>
-                <section className="statsGrid">
+                <section className={`statsGrid ${isBoss ? 'boss-grid' : 'staff-grid'}`}>
                   <article className="statCard"><span>{t(lang, 'stat_new_users')}</span><strong>{data.summary.newUsers}</strong></article>
                   <article className="statCard"><span>{t(lang, 'stat_paid_users')}</span><strong>{data.summary.paidUsers}</strong></article>
                   <article className="statCard"><span>{t(lang, 'stat_total_amount')}</span><strong>{fmt(data.summary.totalAmount, lang)}</strong></article>
