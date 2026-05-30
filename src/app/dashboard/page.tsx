@@ -108,6 +108,17 @@ export default function DashboardPage() {
   const [formError, setFormError] = useState('');
   const [formLoading, setFormLoading] = useState(false);
 
+  const [currentPage, setCurrentPage] = useState(1);
+  const pageSize = 20;
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [filterEmployee, appliedStartDate, appliedEndDate]);
+
+  const filteredUsers = data ? data.users.filter((u) => !filterEmployee || u.employeeName === filterEmployee) : [];
+  const paginatedUsers = filteredUsers.slice((currentPage - 1) * pageSize, (currentPage - 1) * pageSize + pageSize);
+  const totalPages = Math.ceil(filteredUsers.length / pageSize);
+
   useEffect(() => {
     const raw = localStorage.getItem('partnerx_user');
     if (!raw) { router.replace('/'); return; }
@@ -433,8 +444,8 @@ export default function DashboardPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {data.users.filter((u) => !filterEmployee || u.employeeName === filterEmployee).length
-                        ? data.users.filter((u) => !filterEmployee || u.employeeName === filterEmployee).map((item) => (
+                      {paginatedUsers.length
+                        ? paginatedUsers.map((item) => (
                         <tr key={item.platformUserId}>
                           <td>{item.platformUserId}</td>
                           {isBoss && <td>{item.employeeName}</td>}
@@ -448,6 +459,24 @@ export default function DashboardPage() {
                     </tbody>
                   </table>
                 </div>
+
+                {totalPages > 1 && (
+                  <div className="pagination">
+                    <button 
+                      disabled={currentPage === 1} 
+                      onClick={() => setCurrentPage(p => p - 1)}
+                    >
+                      {lang === 'zh' ? '上一页' : 'Prev'}
+                    </button>
+                    <span>{currentPage} / {totalPages}</span>
+                    <button 
+                      disabled={currentPage === totalPages} 
+                      onClick={() => setCurrentPage(p => p + 1)}
+                    >
+                      {lang === 'zh' ? '下一页' : 'Next'}
+                    </button>
+                  </div>
+                )}
               </section>
             )}
           </>
