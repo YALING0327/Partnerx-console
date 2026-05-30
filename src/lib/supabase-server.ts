@@ -21,3 +21,19 @@ export const supabaseServer = createClient(
     }
   }
 );
+
+export async function fetchAll<T = any>(query: any): Promise<T[]> {
+  const pageSize = 1000;
+  let from = 0;
+  const allData: T[] = [];
+  while (true) {
+    const to = from + pageSize - 1;
+    const { data, error } = await query.range(from, to);
+    if (error) throw error;
+    if (!data || data.length === 0) break;
+    allData.push(...data);
+    if (data.length < pageSize) break;
+    from += pageSize;
+  }
+  return allData;
+}

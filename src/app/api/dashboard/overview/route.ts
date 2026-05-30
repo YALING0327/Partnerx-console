@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { supabaseServer } from '@/lib/supabase-server';
+import { supabaseServer, fetchAll } from '@/lib/supabase-server';
 
 type LoginRole = 'boss' | 'staff';
 
@@ -113,8 +113,8 @@ export async function POST(request: Request) {
         .select('employee_id, platform_user_id, amount, pay_time, status')
         .eq('company_id', companyId);
 
-      if (startDate) rechargeQuery = rechargeQuery.gte('pay_time', startDate);
-      if (endDate) rechargeQuery = rechargeQuery.lte('pay_time', endDate + 'T23:59:59Z');
+      // Only filter by bind_time to implement Cohort analysis as requested
+      // We do not filter recharges by pay_time here, so we get the full LTV of these matched users.
 
       let attributionQuery = supabaseServer
         .from('attribution_users')
@@ -124,35 +124,44 @@ export async function POST(request: Request) {
       if (startDate) attributionQuery = attributionQuery.gte('bind_time', startDate);
       if (endDate) attributionQuery = attributionQuery.lte('bind_time', endDate + 'T23:59:59Z');
 
-      const [employeesResult, attributionsResult, rechargesResult] = await Promise.all([
+      const [employeesResult, attributions, recharges] = await Promise.all([
         supabaseServer
           .from('employees')
           .select('id, account_id, employee_name, invite_code, inviter_id, status')
           .eq('company_id', companyId)
           .order('created_at', { ascending: true }),
-        attributionQuery.order('bind_time', { ascending: false }),
-        rechargeQuery.order('pay_time', { ascending: false })
+        fetchAll<AttributionRow>(attributionQuery.order('bind_time', { ascending: false })),
+        fetchAll<RechargeRow>(rechargeQuery.order('pay_time', { ascending: false }))
       ]);
 
-      if (employeesResult.error || attributionsResult.error || rechargesResult.error) {
+      if (employeesResult.error) {
         return NextResponse.json({ error: '读取控制台数据失败' }, { status: 500 });
       }
 
       const employees = (employeesResult.data ?? []) as EmployeeRow[];
-      const attributions = (attributionsResult.data ?? []) as AttributionRow[];
-      const recharges = (rechargesResult.data ?? []) as RechargeRow[];
-      const summary = buildSummary(attributions, recharges);
+      
+      // If a date filter is applied, we only want to consider users who bound in this period
+      const hasDateFilter = !!startDate || !!endDate;
+      const validUserIds = new Set(attributions.map(a => a.platform_user_id));
+      
+      // Filter recharges to only include valid users (if date filter applied)
+      // If no date filter, validUserIds contains all attributions. We might still want to include recharges for users with no attribution.
+      const filteredRecharges = hasDateFilter 
+        ? recharges.filter(r => validUserIds.has(r.platform_user_id))
+        : recharges;
+
+      const summary = buildSummary(attributions, filteredRecharges);
 
       const employeeRows = employees.map((employee) => {
         const employeeUsers = attributions.filter((item) => item.employee_id === employee.id);
-        const employeeOrders = recharges.filter((item) => item.employee_id === employee.id);
+        const employeeOrders = filteredRecharges.filter((item) => item.employee_id === employee.id);
         const employeeSummary = buildSummary(employeeUsers, employeeOrders);
         return { id: employee.id, name: employee.employee_name, inviteCode: employee.invite_code, inviterId: employee.inviter_id ?? null, status: employee.status, ...employeeSummary };
       });
 
       const employeeMap = new Map(employees.map((item) => [item.id, item]));
       const ordersByUser = new Map<string, RechargeRow[]>();
-      for (const order of recharges) {
+      for (const order of filteredRecharges) {
         const current = ordersByUser.get(order.platform_user_id) ?? [];
         current.push(order);
         ordersByUser.set(order.platform_user_id, current);
@@ -163,10 +172,12 @@ export async function POST(request: Request) {
         attributionMap.set(a.platform_user_id, a);
       }
 
-      const allUserIds = new Set([
-        ...attributions.map((a) => a.platform_user_id),
-        ...recharges.map((r) => r.platform_user_id)
-      ]);
+      const allUserIds = hasDateFilter 
+        ? new Set(attributions.map((a) => a.platform_user_id))
+        : new Set([
+            ...attributions.map((a) => a.platform_user_id),
+            ...filteredRecharges.map((r) => r.platform_user_id)
+          ]);
 
       const users = Array.from(allUserIds).map((platformUserId) => {
         const attr = attributionMap.get(platformUserId);
@@ -210,8 +221,7 @@ export async function POST(request: Request) {
       .eq('company_id', companyId)
       .eq('employee_id', employee.id);
 
-    if (startDate) rechargeQuery = rechargeQuery.gte('pay_time', startDate);
-    if (endDate) rechargeQuery = rechargeQuery.lte('pay_time', endDate + 'T23:59:59Z');
+    // Remove pay_time filter to get full LTV
 
     let attributionQuery = supabaseServer
       .from('attribution_users')
@@ -222,20 +232,21 @@ export async function POST(request: Request) {
     if (startDate) attributionQuery = attributionQuery.gte('bind_time', startDate);
     if (endDate) attributionQuery = attributionQuery.lte('bind_time', endDate + 'T23:59:59Z');
 
-    const [attributionsResult, rechargesResult] = await Promise.all([
-      attributionQuery.order('bind_time', { ascending: false }),
-      rechargeQuery.order('pay_time', { ascending: false })
+    const [attributions, recharges] = await Promise.all([
+      fetchAll<AttributionRow>(attributionQuery.order('bind_time', { ascending: false })),
+      fetchAll<RechargeRow>(rechargeQuery.order('pay_time', { ascending: false }))
     ]);
 
-    if (attributionsResult.error || rechargesResult.error) {
-      return NextResponse.json({ error: '读取员工数据失败' }, { status: 500 });
-    }
+    const hasDateFilter = !!startDate || !!endDate;
+    const validUserIds = new Set(attributions.map(a => a.platform_user_id));
+    
+    const filteredRecharges = hasDateFilter 
+      ? recharges.filter(r => validUserIds.has(r.platform_user_id))
+      : recharges;
 
-    const attributions = (attributionsResult.data ?? []) as AttributionRow[];
-    const recharges = (rechargesResult.data ?? []) as RechargeRow[];
-    const summary = buildSummary(attributions, recharges);
+    const summary = buildSummary(attributions, filteredRecharges);
     const ordersByUser = new Map<string, RechargeRow[]>();
-    for (const order of recharges) {
+    for (const order of filteredRecharges) {
       const current = ordersByUser.get(order.platform_user_id) ?? [];
       current.push(order);
       ordersByUser.set(order.platform_user_id, current);
@@ -246,10 +257,12 @@ export async function POST(request: Request) {
       attributionMap.set(a.platform_user_id, a);
     }
 
-    const allUserIds = new Set([
-      ...attributions.map((a) => a.platform_user_id),
-      ...recharges.map((r) => r.platform_user_id)
-    ]);
+    const allUserIds = hasDateFilter 
+      ? new Set(attributions.map((a) => a.platform_user_id))
+      : new Set([
+          ...attributions.map((a) => a.platform_user_id),
+          ...filteredRecharges.map((r) => r.platform_user_id)
+        ]);
 
     const users = Array.from(allUserIds).map((platformUserId) => {
       const attr = attributionMap.get(platformUserId);

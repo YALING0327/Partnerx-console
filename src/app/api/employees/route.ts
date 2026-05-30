@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { supabaseServer } from '@/lib/supabase-server';
+import { supabaseServer, fetchAll } from '@/lib/supabase-server';
 
 type AuthBody = {
   requesterId?: string;
@@ -76,29 +76,31 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: '无权限' }, { status: 403 });
     }
 
-    const [employeesResult, attributionsResult, rechargesResult] = await Promise.all([
+    const [employeesResult, attributions, recharges] = await Promise.all([
       supabaseServer
         .from('employees')
         .select('id, account_id, employee_name, invite_code, inviter_id, status')
         .eq('company_id', requesterCompanyId)
         .order('created_at', { ascending: true }),
-      supabaseServer
-        .from('attribution_users')
-        .select('employee_id, platform_user_id')
-        .eq('company_id', requesterCompanyId),
-      supabaseServer
-        .from('recharge_orders')
-        .select('employee_id, platform_user_id, amount, status')
-        .eq('company_id', requesterCompanyId)
+      fetchAll<AttributionRow>(
+        supabaseServer
+          .from('attribution_users')
+          .select('employee_id, platform_user_id')
+          .eq('company_id', requesterCompanyId)
+      ),
+      fetchAll<RechargeRow>(
+        supabaseServer
+          .from('recharge_orders')
+          .select('employee_id, platform_user_id, amount, status')
+          .eq('company_id', requesterCompanyId)
+      )
     ]);
 
-    if (employeesResult.error || attributionsResult.error || rechargesResult.error) {
+    if (employeesResult.error) {
       return NextResponse.json({ error: '读取员工列表失败' }, { status: 500 });
     }
 
     const employees = (employeesResult.data ?? []) as EmployeeRow[];
-    const attributions = (attributionsResult.data ?? []) as AttributionRow[];
-    const recharges = (rechargesResult.data ?? []) as RechargeRow[];
 
     const responseRows = employees.map((employee) => {
       const employeeAttributions = attributions.filter((item) => item.employee_id === employee.id);
