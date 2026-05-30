@@ -64,8 +64,18 @@ function fmtDate(value: string | null, lang: Lang) {
 }
 
 function exportCsv(filename: string, rows: string[][], headers: string[]) {
-  const lines = [headers, ...rows].map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(','));
-  const blob = new Blob(['﻿' + lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+  // Add \t (tab) to strings that look like dates or long numbers to force Excel to treat them as text, preventing ##### or scientific notation
+  const formatCell = (c: string) => {
+    const str = String(c).replace(/"/g, '""');
+    // If it contains a date/time format or is a long number like an ID, prepend \t
+    if (str.includes(':') || str.includes('/') || str.includes('-') || (str.length > 8 && /^\d+$/.test(str))) {
+      return `"\t${str}"`;
+    }
+    return `"${str}"`;
+  };
+  
+  const lines = [headers.map(formatCell), ...rows.map((r) => r.map(formatCell))].map(r => r.join(','));
+  const blob = new Blob(['\uFEFF' + lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
@@ -367,8 +377,31 @@ export default function DashboardPage() {
                 <div className="sectionHead">
                   <div><p className="sectionLabel">{t(lang, 'section_user_detail')}</p><h2>{isBoss ? t(lang, 'section_team_user_recharge') : t(lang, 'section_my_user_recharge')}</h2></div>
                   <button className="addBtn" onClick={() => {
-                    const rows = data.users.map((u) => [u.platformUserId, u.employeeName, u.inviteCode, fmtDate(u.bindTime, lang), fmtDate(u.firstRechargeAt, lang), String(u.rechargeCount), String(((Number(u.totalAmount || 0) || 0) / 100).toFixed(2)), fmtDate(u.lastRechargeAt, lang)]);
-                    exportCsv(t(lang, 'export_filename'), rows, [t(lang, 'export_h_user_id'), t(lang, 'export_h_employee'), t(lang, 'export_h_invite_code'), t(lang, 'export_h_bind_time'), t(lang, 'export_h_first_recharge'), t(lang, 'export_h_recharge_count'), t(lang, 'export_h_total_amount'), t(lang, 'export_h_last_recharge')]);
+                    // Export only the filtered data
+                    const filteredUsers = data.users.filter((u) => !filterEmployee || u.employeeName === filterEmployee);
+                    const rows = filteredUsers.map((u) => [
+                      u.platformUserId,
+                      isBoss ? u.employeeName : '', // Only include employee name if boss
+                      u.inviteCode,
+                      u.bindTime ? new Date(u.bindTime).toLocaleString('zh-CN', { hour12: false }) : '-', // Force string format for CSV to avoid Excel #####
+                      u.firstRechargeAt ? new Date(u.firstRechargeAt).toLocaleString('zh-CN', { hour12: false }) : '-',
+                      String(u.rechargeCount),
+                      String(((Number(u.totalAmount || 0) || 0) / 100).toFixed(2)),
+                      u.lastRechargeAt ? new Date(u.lastRechargeAt).toLocaleString('zh-CN', { hour12: false }) : '-'
+                    ].filter(Boolean)); // filter(Boolean) removes the empty string if not boss
+                    
+                    const headers = [
+                      t(lang, 'export_h_user_id'),
+                      isBoss ? t(lang, 'export_h_employee') : '',
+                      t(lang, 'export_h_invite_code'),
+                      t(lang, 'export_h_bind_time'),
+                      t(lang, 'export_h_first_recharge'),
+                      t(lang, 'export_h_recharge_count'),
+                      t(lang, 'export_h_total_amount'),
+                      t(lang, 'export_h_last_recharge')
+                    ].filter(Boolean); // remove empty string if not boss
+
+                    exportCsv(t(lang, 'export_filename'), rows, headers as string[]);
                   }}>{t(lang, 'export_csv')}</button>
                 </div>
 
