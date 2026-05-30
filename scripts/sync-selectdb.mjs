@@ -44,7 +44,8 @@ function toKeysetTime(value) {
 
 function normalizeStatus(value) {
   const raw = String(value ?? '').toLowerCase();
-  if (['success', 'paid', 'pay_success', 'completed', 'finish', 'finished', '1'].includes(raw)) {
+  // SelectDB might have event name 'recharge' or status 'success', treat them both as success for now
+  if (['success', 'paid', 'pay_success', 'completed', 'finish', 'finished', '1', 'recharge'].includes(raw)) {
     return 'success';
   }
   if (['failed', 'fail', '0', 'closed', 'cancel'].includes(raw)) {
