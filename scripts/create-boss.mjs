@@ -23,9 +23,6 @@ async function createBoss() {
     process.exit(1);
   }
 
-  // 获取现有的 company_id (默认使用 00000000-0000-0000-0000-000000000001)
-  const companyId = '00000000-0000-0000-0000-000000000001';
-
   // 检查账号是否已存在
   const { data: existing } = await supabase
     .from('company_accounts')
@@ -38,9 +35,24 @@ async function createBoss() {
     process.exit(1);
   }
 
-  // 插入新的老板账号
+  // 1. 为新老板创建独立的 company 记录
+  const { data: newCompany, error: companyError } = await supabase
+    .from('companies')
+    .insert({
+      company_name: `${name || username} 的公司`,
+      status: 'active'
+    })
+    .select('id')
+    .single();
+
+  if (companyError || !newCompany) {
+    console.error("❌ 创建独立公司空间失败:", companyError?.message);
+    process.exit(1);
+  }
+
+  // 2. 插入新的老板账号
   const { data, error } = await supabase.from('company_accounts').insert({
-    company_id: companyId,
+    company_id: newCompany.id,
     role: 'boss',
     username: username,
     password_hash: password,

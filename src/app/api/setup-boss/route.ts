@@ -16,8 +16,6 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: '账号和密码不能为空' }, { status: 400 });
     }
 
-    const companyId = '00000000-0000-0000-0000-000000000001';
-
     // 检查账号是否已存在
     const { data: existing } = await supabaseServer
       .from('company_accounts')
@@ -29,11 +27,25 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: '该账号已被使用，请换一个' }, { status: 409 });
     }
 
-    // 插入账号
+    // 1. 先为这个老板创建一个独立的公司实体 (Company)
+    const { data: newCompany, error: companyError } = await supabaseServer
+      .from('companies')
+      .insert({
+        company_name: `${name || username} 的公司`,
+        status: 'active'
+      })
+      .select('id')
+      .single();
+
+    if (companyError || !newCompany) {
+      return NextResponse.json({ error: '创建独立公司空间失败' }, { status: 500 });
+    }
+
+    // 2. 将老板账号绑定到刚创建的独立公司空间
     const { error: insertError } = await supabaseServer
       .from('company_accounts')
       .insert({
-        company_id: companyId,
+        company_id: newCompany.id,
         role: 'boss',
         username: username.trim(),
         password_hash: password.trim(),
