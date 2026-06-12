@@ -15,6 +15,7 @@ type StoredUser = {
 type BossEmployee = {
   id: string;
   name: string;
+  username: string;
   inviteCode: string;
   inviterId: string | null;
   status: string;
@@ -108,6 +109,16 @@ export default function DashboardPage() {
   const [formError, setFormError] = useState('');
   const [formLoading, setFormLoading] = useState(false);
 
+  // Employee edit form
+  const [editingEmployee, setEditingEmployee] = useState<BossEmployee | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editUsername, setEditUsername] = useState('');
+  const [editPassword, setEditPassword] = useState('');
+  const [editInviteCode, setEditInviteCode] = useState('');
+  const [editInviterId, setEditInviterId] = useState('');
+  const [editFormError, setEditFormError] = useState('');
+  const [editFormLoading, setEditFormLoading] = useState(false);
+
   const [currentPage, setCurrentPage] = useState(1);
   const pageSize = 20;
 
@@ -193,6 +204,49 @@ export default function DashboardPage() {
       body: JSON.stringify({ requesterId: user.id, requesterCompanyId: user.companyId, requesterRole: user.role, employeeId, action })
     });
     void loadDashboard(user, appliedStartDate, appliedEndDate);
+  }
+
+  async function handleEditEmployee(e: React.FormEvent) {
+    e.preventDefault();
+    if (!user || !editingEmployee) return;
+    setEditFormLoading(true);
+    setEditFormError('');
+    try {
+      const res = await fetch('/api/employees', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          requesterId: user.id,
+          requesterCompanyId: user.companyId,
+          requesterRole: user.role,
+          employeeId: editingEmployee.id,
+          employeeName: editName,
+          username: editUsername,
+          password: editPassword || undefined,
+          inviteCode: editInviteCode,
+          inviterId: editInviterId
+        })
+      });
+      const result = await res.json() as { message?: string; error?: string };
+      if (!res.ok) { setEditFormError(result.error ?? '修改失败'); return; }
+      setEditingEmployee(null);
+      void loadDashboard(user, appliedStartDate, appliedEndDate);
+    } catch (e) {
+      setEditFormError(e instanceof Error ? e.message : '修改失败');
+    } finally {
+      setEditFormLoading(false);
+    }
+  }
+
+  function openEditForm(emp: BossEmployee) {
+    setEditingEmployee(emp);
+    setEditName(emp.name);
+    setEditUsername(emp.username || '');
+    setEditPassword(''); // empty means no change
+    setEditInviteCode(emp.inviteCode);
+    setEditInviterId(emp.inviterId || '');
+    setEditFormError('');
+    setShowAddForm(false);
   }
 
   function handleLogout() {
@@ -321,7 +375,7 @@ export default function DashboardPage() {
                   <>
                     <div className="sectionHead">
                       <div><p className="sectionLabel">{t(lang, 'section_employee_mgmt')}</p><h2>{t(lang, 'section_employee_list')}</h2></div>
-                      <button className="addBtn" onClick={() => { setShowAddForm(true); setFormError(''); }}>{t(lang, 'add_employee')}</button>
+                      <button className="addBtn" onClick={() => { setShowAddForm(true); setFormError(''); setEditingEmployee(null); }}>{t(lang, 'add_employee')}</button>
                     </div>
 
                     {showAddForm && (
@@ -346,6 +400,28 @@ export default function DashboardPage() {
                       </form>
                     )}
 
+                    {editingEmployee && (
+                      <form className="addForm" onSubmit={(e) => void handleEditEmployee(e)}>
+                        <h3>{t(lang, 'edit_employee_title')}</h3>
+                        <div className="formRow">
+                          <label className="field"><span>{t(lang, 'field_employee_name')}</span><input value={editName} onChange={(e) => setEditName(e.target.value)} placeholder={t(lang, 'placeholder_employee_name')} required /></label>
+                          <label className="field"><span>{t(lang, 'field_login_username')}</span><input value={editUsername} onChange={(e) => setEditUsername(e.target.value)} placeholder={t(lang, 'placeholder_login_username')} required /></label>
+                        </div>
+                        <div className="formRow">
+                          <label className="field"><span>{t(lang, 'field_initial_password')}</span><input type="password" value={editPassword} onChange={(e) => setEditPassword(e.target.value)} placeholder={t(lang, 'placeholder_password_optional')} minLength={6} /></label>
+                          <label className="field"><span>{t(lang, 'field_invite_code')}</span><input value={editInviteCode} onChange={(e) => setEditInviteCode(e.target.value)} placeholder={t(lang, 'placeholder_invite_code')} required /></label>
+                        </div>
+                        <div className="formRow">
+                          <label className="field"><span>{t(lang, 'field_inviter_id')}</span><input value={editInviterId} onChange={(e) => setEditInviterId(e.target.value)} placeholder={t(lang, 'placeholder_inviter_id')} /></label>
+                        </div>
+                        {editFormError && <p className="formError">{editFormError}</p>}
+                        <div className="formActions">
+                          <button type="submit" className="submitBtn" disabled={editFormLoading}>{editFormLoading ? t(lang, 'edit_loading') : t(lang, 'edit_confirm')}</button>
+                          <button type="button" className="cancelBtn" onClick={() => setEditingEmployee(null)}>{t(lang, 'cancel')}</button>
+                        </div>
+                      </form>
+                    )}
+
                     <div className="tableWrap">
                       <table className="dataTable">
                         <thead><tr><th>{t(lang, 'th_employee_name')}</th><th>{t(lang, 'th_invite_code')}</th><th>{t(lang, 'th_inviter_id')}</th><th>{t(lang, 'th_new_users')}</th><th>{t(lang, 'th_paid_users')}</th><th>{t(lang, 'th_total_amount')}</th><th>{t(lang, 'th_status')}</th><th>{t(lang, 'th_action')}</th></tr></thead>
@@ -356,9 +432,14 @@ export default function DashboardPage() {
                               <td>{emp.paidUsers}</td><td>{fmt(emp.totalAmount, lang)}</td>
                               <td><span className={emp.status === 'active' ? 'statusActive' : 'statusDisabled'}>{emp.status === 'active' ? t(lang, 'status_active') : t(lang, 'status_disabled')}</span></td>
                               <td>
-                                <button className="actionBtn" onClick={() => void handleToggleEmployee(emp.id, emp.status)}>
-                                  {emp.status === 'active' ? t(lang, 'action_disable') : t(lang, 'action_enable')}
-                                </button>
+                                <div style={{ display: 'flex', gap: '8px' }}>
+                                  <button className="actionBtn" onClick={() => openEditForm(emp)}>
+                                    {t(lang, 'action_edit')}
+                                  </button>
+                                  <button className="actionBtn" onClick={() => void handleToggleEmployee(emp.id, emp.status)}>
+                                    {emp.status === 'active' ? t(lang, 'action_disable') : t(lang, 'action_enable')}
+                                  </button>
+                                </div>
                               </td>
                             </tr>
                           ))}

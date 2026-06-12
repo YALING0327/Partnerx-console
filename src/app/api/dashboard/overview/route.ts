@@ -152,11 +152,25 @@ export async function POST(request: Request) {
 
       const summary = buildSummary(attributions, filteredRecharges);
 
+      const { data: accountsData } = await supabaseServer
+        .from('company_accounts')
+        .select('id, username')
+        .eq('company_id', companyId);
+      const accountMap = new Map(accountsData?.map(a => [a.id, a.username]) || []);
+
       const employeeRows = employees.map((employee) => {
         const employeeUsers = attributions.filter((item) => item.employee_id === employee.id);
         const employeeOrders = filteredRecharges.filter((item) => item.employee_id === employee.id);
         const employeeSummary = buildSummary(employeeUsers, employeeOrders);
-        return { id: employee.id, name: employee.employee_name, inviteCode: employee.invite_code, inviterId: employee.inviter_id ?? null, status: employee.status, ...employeeSummary };
+        return { 
+          id: employee.id, 
+          name: employee.employee_name, 
+          username: accountMap.get(employee.account_id) ?? '',
+          inviteCode: employee.invite_code, 
+          inviterId: employee.inviter_id ?? null, 
+          status: employee.status, 
+          ...employeeSummary 
+        };
       });
 
       const employeeMap = new Map(employees.map((item) => [item.id, item]));

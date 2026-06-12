@@ -274,3 +274,108 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: '服务器错误' }, { status: 500 });
   }
 }
+
+export async function PUT(request: Request) {
+  try {
+    const body = await request.json() as AuthBody & {
+      employeeId?: string;
+      employeeName?: string;
+      username?: string;
+      password?: string;
+      inviteCode?: string;
+      inviterId?: string;
+    };
+
+    const { requesterId, requesterCompanyId, requesterRole, employeeId, employeeName, username, password, inviteCode, inviterId } = body;
+
+    if (!requesterId || !requesterCompanyId || !requesterRole) {
+      return NextResponse.json({ error: '缺少身份信息' }, { status: 401 });
+    }
+    if (!employeeId) {
+      return NextResponse.json({ error: '缺少员工 ID' }, { status: 400 });
+    }
+
+    const authorized = await verifyBoss(requesterId, requesterCompanyId, requesterRole);
+    if (!authorized) {
+      return NextResponse.json({ error: '无权限' }, { status: 403 });
+    }
+
+    const { data: employee, error: fetchError } = await supabaseServer
+      .from('employees')
+      .select('account_id')
+      .eq('id', employeeId)
+      .eq('company_id', requesterCompanyId)
+      .single();
+
+    if (fetchError || !employee) {
+      return NextResponse.json({ error: '员工不存在' }, { status: 404 });
+    }
+
+    if (username) {
+      const { data: existingAccount } = await supabaseServer
+        .from('company_accounts')
+        .select('id')
+        .eq('username', username)
+        .neq('id', employee.account_id)
+        .maybeSingle();
+      if (existingAccount) {
+        return NextResponse.json({ error: '该账号名已被其他用户使用' }, { status: 409 });
+      }
+    }
+
+    if (inviteCode) {
+      const { data: existingCode } = await supabaseServer
+        .from('employees')
+        .select('id')
+        .eq('invite_code', inviteCode)
+        .neq('id', employeeId)
+        .maybeSingle();
+      if (existingCode) {
+        return NextResponse.json({ error: '该邀请码已被其他员工使用' }, { status: 409 });
+      }
+    }
+
+    const inviterIdValue = inviterId !== undefined ? (inviterId ?? '').trim() : undefined;
+    if (inviterIdValue !== undefined && inviterIdValue !== '' && !/^\d+$/.test(inviterIdValue)) {
+      return NextResponse.json({ error: '邀请人ID 必须是纯数字' }, { status: 400 });
+    }
+
+    if (inviterIdValue) {
+      const { data: existingInviter } = await supabaseServer
+        .from('employees')
+        .select('id')
+        .eq('company_id', requesterCompanyId)
+        .eq('inviter_id', inviterIdValue)
+        .neq('id', employeeId)
+        .maybeSingle();
+      if (existingInviter) {
+        return NextResponse.json({ error: '该邀请人ID 已被使用' }, { status: 409 });
+      }
+    }
+
+    const accountUpdate: any = {};
+    if (username) accountUpdate.username = username.trim();
+    if (password) accountUpdate.password_hash = password;
+    if (employeeName) accountUpdate.name = employeeName.trim();
+
+    if (Object.keys(accountUpdate).length > 0) {
+      const { error: accError } = await supabaseServer.from('company_accounts').update(accountUpdate).eq('id', employee.account_id);
+      if (accError) return NextResponse.json({ error: '更新账号信息失败' }, { status: 500 });
+    }
+
+    const employeeUpdate: any = {};
+    if (employeeName) employeeUpdate.employee_name = employeeName.trim();
+    if (inviteCode) employeeUpdate.invite_code = inviteCode;
+    if (inviterIdValue !== undefined) employeeUpdate.inviter_id = inviterIdValue || null;
+
+    if (Object.keys(employeeUpdate).length > 0) {
+      const { error: empError } = await supabaseServer.from('employees').update(employeeUpdate).eq('id', employeeId);
+      if (empError) return NextResponse.json({ error: '更新员工资料失败' }, { status: 500 });
+    }
+
+    return NextResponse.json({ message: '修改成功' });
+  } catch (err) {
+    console.error('更新员工失败', err);
+    return NextResponse.json({ error: '服务器错误' }, { status: 500 });
+  }
+}

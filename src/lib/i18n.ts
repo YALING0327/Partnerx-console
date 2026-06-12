@@ -98,6 +98,11 @@ const dictionary = {
     placeholder_inviter_id: '例：156938339',
     create_loading: '创建中...',
     create_confirm: '确认创建',
+    edit_employee_title: '编辑员工',
+    edit_loading: '保存中...',
+    edit_confirm: '确认保存',
+    action_edit: '编辑',
+    placeholder_password_optional: '留空表示不修改',
     cancel: '取消',
     create_failed: '创建失败',
 
@@ -208,6 +213,11 @@ const dictionary = {
     placeholder_inviter_id: 'e.g. 156938339',
     create_loading: 'Creating...',
     create_confirm: 'Create',
+    edit_employee_title: 'Edit Employee',
+    edit_loading: 'Saving...',
+    edit_confirm: 'Save',
+    action_edit: 'Edit',
+    placeholder_password_optional: 'Leave blank to keep unchanged',
     cancel: 'Cancel',
     create_failed: 'Create failed',
 
