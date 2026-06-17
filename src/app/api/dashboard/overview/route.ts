@@ -18,6 +18,7 @@ type EmployeeRow = {
   employee_name: string;
   invite_code: string;
   inviter_id?: string | null;
+  attribution_key?: string | null;
   status: string;
 };
 
@@ -41,7 +42,8 @@ function formatDashboardUser(
   inviteCode: string,
   employeeName: string,
   bindTime: string | null,
-  orders: RechargeRow[]
+  orders: RechargeRow[],
+  campaignKeys?: Set<string>
 ) {
   const paidOrders = orders.filter((item) => item.status === 'success');
   const totalAmount = paidOrders.reduce((sum, item) => sum + Number(item.amount || 0), 0);
@@ -49,11 +51,15 @@ function formatDashboardUser(
     .map((item) => item.pay_time)
     .sort((a, b) => new Date(a).getTime() - new Date(b).getTime());
 
+  // 来源判断：归因键命中某员工的 attribution_key(campaign) -> Adjust 链接；否则 -> 邀请码
+  const source = campaignKeys && inviteCode && campaignKeys.has(inviteCode) ? 'adjust' : 'invite';
+
   return {
     platformUserId: userId,
     employeeName,
     inviteCode,
     bindTime,
+    source,
     firstRechargeAt: sortedTimes[0] ?? null,
     lastRechargeAt: sortedTimes[sortedTimes.length - 1] ?? null,
     rechargeCount: paidOrders.length,
@@ -127,7 +133,7 @@ export async function POST(request: Request) {
       const [employeesResult, attributions, recharges] = await Promise.all([
         supabaseServer
           .from('employees')
-          .select('id, account_id, employee_name, invite_code, inviter_id, status')
+          .select('id, account_id, employee_name, invite_code, inviter_id, attribution_key, status')
           .eq('company_id', companyId)
           .order('created_at', { ascending: true }),
         fetchAll<AttributionRow>(attributionQuery.order('bind_time', { ascending: false })),
@@ -139,7 +145,11 @@ export async function POST(request: Request) {
       }
 
       const employees = (employeesResult.data ?? []) as EmployeeRow[];
-      
+      // 所有员工的 attribution_key（campaign）集合，用于判断用户来源
+      const campaignKeys = new Set(
+        employees.map((e) => (e.attribution_key ?? '').trim()).filter(Boolean)
+      );
+
       // If a date filter is applied, we only want to consider users who bound in this period
       const hasDateFilter = !!startDate || !!endDate;
       const validUserIds = new Set(attributions.map(a => a.platform_user_id));
@@ -204,7 +214,8 @@ export async function POST(request: Request) {
           attr?.invite_code ?? emp?.invite_code ?? '-',
           emp?.employee_name ?? '未知员工',
           attr?.bind_time ?? null,
-          userOrders
+          userOrders,
+          campaignKeys
         );
       });
 
@@ -220,7 +231,7 @@ export async function POST(request: Request) {
     // staff
     const { data: employee, error: employeeError } = await supabaseServer
       .from('employees')
-      .select('id, account_id, employee_name, invite_code, inviter_id, status')
+      .select('id, account_id, employee_name, invite_code, inviter_id, attribution_key, status')
       .eq('company_id', companyId)
       .eq('account_id', userId)
       .single();
@@ -228,6 +239,11 @@ export async function POST(request: Request) {
     if (employeeError || !employee) {
       return NextResponse.json({ error: '未找到员工资料' }, { status: 404 });
     }
+
+    // 该员工的 attribution_key（campaign）集合
+    const staffCampaignKeys = new Set(
+      [String((employee as EmployeeRow).attribution_key ?? '').trim()].filter(Boolean)
+    );
 
     let rechargeQuery = supabaseServer
       .from('recharge_orders')
@@ -287,7 +303,8 @@ export async function POST(request: Request) {
         attr?.invite_code ?? employee.invite_code,
         employee.employee_name,
         attr?.bind_time ?? null,
-        userOrders
+        userOrders,
+        staffCampaignKeys
       );
     });
 

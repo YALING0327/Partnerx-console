@@ -30,6 +30,7 @@ type DashboardUser = {
   employeeName: string;
   inviteCode: string;
   bindTime: string | null;
+  source?: 'adjust' | 'invite';
   firstRechargeAt: string | null;
   lastRechargeAt: string | null;
   rechargeCount: number;
@@ -61,7 +62,8 @@ function fmt(value: number, lang: Lang) {
 
 function fmtDate(value: string | null, lang: Lang) {
   if (!value) return '-';
-  return new Date(value).toLocaleString(langLocale(lang), { hour12: false });
+  // 统一显示为北京时间（UTC+8），不随浏览器所在时区变化
+  return new Date(value).toLocaleString(langLocale(lang), { hour12: false, timeZone: 'Asia/Shanghai' });
 }
 
 function exportCsv(filename: string, rows: string[][], headers: string[]) {
@@ -475,17 +477,19 @@ export default function DashboardPage() {
                       u.platformUserId,
                       isBoss ? u.employeeName : '', // Only include employee name if boss
                       u.inviteCode,
-                      u.bindTime ? new Date(u.bindTime).toLocaleString('zh-CN', { hour12: false }) : '-', // Force string format for CSV to avoid Excel #####
-                      u.firstRechargeAt ? new Date(u.firstRechargeAt).toLocaleString('zh-CN', { hour12: false }) : '-',
+                      u.source === 'adjust' ? (lang === 'zh' ? 'Adjust链接' : 'Adjust Link') : (lang === 'zh' ? '邀请码' : 'Invite Code'),
+                      u.bindTime ? new Date(u.bindTime).toLocaleString('zh-CN', { hour12: false, timeZone: 'Asia/Shanghai' }) : '-', // Force string format for CSV to avoid Excel #####
+                      u.firstRechargeAt ? new Date(u.firstRechargeAt).toLocaleString('zh-CN', { hour12: false, timeZone: 'Asia/Shanghai' }) : '-',
                       String(u.rechargeCount),
                       String(((Number(u.totalAmount || 0) || 0) / 100).toFixed(2)),
-                      u.lastRechargeAt ? new Date(u.lastRechargeAt).toLocaleString('zh-CN', { hour12: false }) : '-'
+                      u.lastRechargeAt ? new Date(u.lastRechargeAt).toLocaleString('zh-CN', { hour12: false, timeZone: 'Asia/Shanghai' }) : '-'
                     ].filter(Boolean)); // filter(Boolean) removes the empty string if not boss
-                    
+
                     const headers = [
                       t(lang, 'export_h_user_id'),
                       isBoss ? t(lang, 'export_h_employee') : '',
                       t(lang, 'export_h_invite_code'),
+                      lang === 'zh' ? '来源' : 'Source',
                       t(lang, 'export_h_bind_time'),
                       t(lang, 'export_h_first_recharge'),
                       t(lang, 'export_h_recharge_count'),
@@ -521,7 +525,7 @@ export default function DashboardPage() {
                       <tr>
                         <th>{t(lang, 'export_h_user_id')}</th>
                         {isBoss && <th>{t(lang, 'export_h_employee')}</th>}
-                        <th>{t(lang, 'export_h_invite_code')}</th><th>{t(lang, 'export_h_bind_time')}</th><th>{t(lang, 'export_h_first_recharge')}</th><th>{t(lang, 'export_h_recharge_count')}</th><th>{t(lang, 'export_h_total_amount')}</th><th>{t(lang, 'export_h_last_recharge')}</th>
+                        <th>{t(lang, 'export_h_invite_code')}</th><th>{lang === 'zh' ? '来源' : 'Source'}</th><th>{t(lang, 'export_h_bind_time')}</th><th>{t(lang, 'export_h_first_recharge')}</th><th>{t(lang, 'export_h_recharge_count')}</th><th>{t(lang, 'export_h_total_amount')}</th><th>{t(lang, 'export_h_last_recharge')}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -530,12 +534,23 @@ export default function DashboardPage() {
                         <tr key={item.platformUserId}>
                           <td>{item.platformUserId}</td>
                           {isBoss && <td>{item.employeeName}</td>}
-                          <td>{item.inviteCode}</td><td>{fmtDate(item.bindTime, lang)}</td>
+                          <td>{item.inviteCode}</td>
+                          <td>
+                            <span style={{
+                              display: 'inline-block', padding: '2px 8px', borderRadius: 6, fontSize: 12, whiteSpace: 'nowrap',
+                              background: item.source === 'adjust' ? 'rgba(124,92,214,0.15)' : 'rgba(52,211,153,0.15)',
+                              color: item.source === 'adjust' ? '#7c5cd6' : '#10b981',
+                              border: item.source === 'adjust' ? '1px solid rgba(124,92,214,0.4)' : '1px solid rgba(52,211,153,0.4)'
+                            }}>
+                              {item.source === 'adjust' ? (lang === 'zh' ? 'Adjust链接' : 'Adjust Link') : (lang === 'zh' ? '邀请码' : 'Invite Code')}
+                            </span>
+                          </td>
+                          <td>{fmtDate(item.bindTime, lang)}</td>
                           <td>{fmtDate(item.firstRechargeAt, lang)}</td><td>{item.rechargeCount}</td>
                           <td>{fmt(item.totalAmount, lang)}</td><td>{fmtDate(item.lastRechargeAt, lang)}</td>
                         </tr>
                       )) : (
-                        <tr><td colSpan={isBoss ? 8 : 7}>{t(lang, 'empty')}</td></tr>
+                        <tr><td colSpan={isBoss ? 9 : 8}>{t(lang, 'empty')}</td></tr>
                       )}
                     </tbody>
                   </table>
