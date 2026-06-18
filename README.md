@@ -157,6 +157,43 @@ npm run reconcile:attribution -- --diff-only --json
 15 * * * * cd /root/Partnerx-console && /usr/bin/env npm run reconcile:attribution -- --diff-only >> /root/Partnerx-console/reconcile-attribution.log 2>&1
 ```
 
+### 5.3 充值对账
+
+为了避免“原始 `recharge` 有订单，但 `recharge_orders` 少单或少金额”这种情况，项目现在也提供了按员工的充值对账脚本：
+
+```bash
+npm run reconcile:recharge
+```
+
+常用参数：
+
+```bash
+# 只看有差异的员工
+npm run reconcile:recharge -- --diff-only
+
+# 只看某个 company
+npm run reconcile:recharge -- --company <company_id>
+
+# 以 JSON 输出，方便告警或脚本处理
+npm run reconcile:recharge -- --diff-only --json
+```
+
+脚本会按员工输出这些口径：
+
+- `rawRechargeOrders`：SelectDB 原始充值订单数
+- `dbRechargeOrders`：`recharge_orders` 当前订单数
+- `rawPaidOrders`：原始成功充值单数
+- `dbPaidOrders`：后台成功充值单数
+- `rawAmountSum`：原始成功充值金额合计
+- `dbAmountSum`：后台成功充值金额合计
+- `diff*`：原始数据与后台数据的差值
+
+建议在服务器上每小时也跑一次：
+
+```cron
+25 * * * * cd /root/Partnerx-console && /usr/bin/env npm run reconcile:recharge -- --diff-only >> /root/Partnerx-console/reconcile-recharge.log 2>&1
+```
+
 ### 6. 脚本会写入哪些表
 
 - `attribution_users`
