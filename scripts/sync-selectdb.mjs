@@ -75,6 +75,51 @@ function normalizeInviteCode(value) {
   return normalizeText(value).toLowerCase();
 }
 
+function parseJsonObject(value) {
+  if (!value) return null;
+  if (typeof value === 'object') return value;
+  const raw = String(value).trim();
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function toFiniteNumber(value) {
+  if (value == null) return null;
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  const raw = String(value).trim();
+  if (!raw) return null;
+  const numeric = Number(raw);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+function extractRechargeAmount(row) {
+  const directCandidates = [row.amount, row.money, row.price, row.pay_amount];
+  for (const candidate of directCandidates) {
+    const numeric = toFiniteNumber(candidate);
+    if (numeric != null) return numeric;
+  }
+
+  const usdAmount = parseJsonObject(row.usd_amount);
+  if (usdAmount) {
+    for (const candidate of [usdAmount.amount, usdAmount.pay_amount, usdAmount.order_amount]) {
+      const numeric = toFiniteNumber(candidate);
+      if (numeric != null) return numeric;
+    }
+  }
+
+  return 0;
+}
+
+function extractRechargeStatus(row) {
+  const usdAmount = parseJsonObject(row.usd_amount);
+  return normalizeStatus(row.status ?? row.pay_status ?? usdAmount?.pay_status ?? 'success');
+}
+
 function stripTrailingSemicolon(sql) {
   return String(sql ?? '').trim().replace(/;+\s*$/g, '');
 }
@@ -190,7 +235,32 @@ async function main() {
          OR (properties['sponsor'] IS NOT NULL AND properties['sponsor'] != '')
     `
   );
-  const rechargeSql = stripTrailingSemicolon(required('SELECTDB_RECHARGE_SQL'));
+  const rechargeSql = stripTrailingSemicolon(
+    process.env.SELECTDB_RECHARGE_RAW_SQL || `
+      SELECT
+        r.id AS order_no,
+        r.account_id AS platform_user_id,
+        CAST(u.campaign AS STRING) AS campaign_key,
+        CAST(u.sponsor AS STRING) AS sponsor_key,
+        r.properties['amount'] AS amount,
+        r.properties['money'] AS money,
+        r.properties['price'] AS price,
+        r.properties['pay_amount'] AS pay_amount,
+        r.properties['usd_amount'] AS usd_amount,
+        CAST(r.properties['pay_status'] AS STRING) AS pay_status,
+        r.event_created_time AS pay_time
+      FROM recharge r
+      JOIN (
+        SELECT
+          account_id,
+          TRIM(CAST(properties['campaign'] AS STRING)) AS campaign,
+          TRIM(CAST(properties['sponsor'] AS STRING)) AS sponsor
+        FROM \`user\`
+      ) u ON r.account_id = u.account_id
+      WHERE (u.campaign IS NOT NULL AND u.campaign != '')
+         OR (u.sponsor IS NOT NULL AND u.sponsor != '')
+    `
+  );
 
   const cursorFilePath = path.resolve(process.cwd(), '.selectdb-sync-cursor.json');
   const resetCursor = process.env.SELECTDB_CURSOR_RESET === '1';
@@ -247,7 +317,6 @@ async function main() {
       // 提取核心的归因同步逻辑为一个函数，方便复用
       async function syncAttributionLoop(targetKeys, startKeyset, isCatchUp = false) {
         if (targetKeys.length === 0) return { keyset: startKeyset, cache: new Map(), read: 0, hit: 0 };
-        const useInviteFilter = true;
         const inviteFilterKeys = targetKeys;
         const keyset = { ...startKeyset };
         let read = 0;
@@ -335,20 +404,21 @@ async function main() {
       // 提取核心的充值同步逻辑为一个函数，方便复用
       async function syncRechargeLoop(targetKeys, startKeyset, attributionCache, isCatchUp = false) {
         if (targetKeys.length === 0) return { keyset: startKeyset, read: 0, hit: 0 };
-        const useInviteFilter = true;
         const inviteFilterKeys = targetKeys;
         const keyset = { ...startKeyset };
         let read = 0;
         let hit = 0;
 
         while (true) {
-          const normalizedInviteExpr = `LOWER(TRIM(CAST(t.invite_code AS STRING)))`;
-          const inviteFilterSql = inviteFilterKeys.length === 1
-            ? ` AND ${normalizedInviteExpr} = ${mysql.escape(inviteFilterKeys[0])}`
-            : ` AND ${normalizedInviteExpr} IN (${inviteFilterKeys.map(k => mysql.escape(k)).join(',')})`;
+          const normalizedCampaignExpr = `LOWER(TRIM(CAST(t.campaign_key AS STRING)))`;
+          const normalizedSponsorExpr = `LOWER(TRIM(CAST(t.sponsor_key AS STRING)))`;
+          const inviteMatchSql = inviteFilterKeys.length === 1
+            ? `(${normalizedCampaignExpr} = ${mysql.escape(inviteFilterKeys[0])} OR ${normalizedSponsorExpr} = ${mysql.escape(inviteFilterKeys[0])})`
+            : `(${normalizedCampaignExpr} IN (${inviteFilterKeys.map(k => mysql.escape(k)).join(',')}) OR ${normalizedSponsorExpr} IN (${inviteFilterKeys.map(k => mysql.escape(k)).join(',')}))`;
+          const inviteFilterSql = ` AND ${inviteMatchSql}`;
           
           const sql = `
-            SELECT t.order_no, t.platform_user_id, t.invite_code, t.amount, t.pay_time, t.status
+            SELECT t.order_no, t.platform_user_id, t.campaign_key, t.sponsor_key, t.amount, t.money, t.price, t.pay_amount, t.usd_amount, t.pay_status, t.pay_time
             FROM (${rechargeSql}) t
             WHERE 1=1
             ${inviteFilterSql}
@@ -376,11 +446,12 @@ async function main() {
           for (const row of rows) {
             const platformUserId = normalizeText(row.platform_user_id);
             const orderNo = normalizeText(row.order_no);
-            const inviteCode = normalizeInviteCode(row.invite_code);
             if (!platformUserId || !orderNo) continue;
 
             const attribution = attributionCache.get(platformUserId);
-            const resolved = inviteCode ? resolveEmployeeAttribution(inviteCode) : null;
+            const campaignResolved = resolveEmployeeAttribution(row.campaign_key);
+            const sponsorResolved = resolveEmployeeAttribution(row.sponsor_key);
+            const resolved = campaignResolved ?? sponsorResolved;
             const employee = resolved?.employee ?? null;
             const companyId = attribution?.company_id ?? employee?.company_id;
             const employeeId = attribution?.employee_id ?? employee?.id;
@@ -392,8 +463,8 @@ async function main() {
               employee_id: employeeId,
               platform_user_id: platformUserId,
               order_no: orderNo,
-              amount: Number(row.amount ?? 0) / amountDivisor,
-              status: normalizeStatus(row.status),
+              amount: extractRechargeAmount(row) / amountDivisor,
+              status: extractRechargeStatus(row),
               pay_time: toIso(row.pay_time),
               is_first_recharge: false
             });
