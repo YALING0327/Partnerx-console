@@ -37,6 +37,45 @@ type RechargeRow = {
   status: string;
 };
 
+function normalizeYmd(value?: string) {
+  const raw = String(value ?? '').trim();
+  if (!raw) return '';
+  return raw.replace(/\//g, '-');
+}
+
+function addDaysYmd(ymd: string, days: number) {
+  const [year, month, day] = normalizeYmd(ymd).split('-').map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  date.setUTCDate(date.getUTCDate() + days);
+  const nextYear = date.getUTCFullYear();
+  const nextMonth = String(date.getUTCMonth() + 1).padStart(2, '0');
+  const nextDay = String(date.getUTCDate()).padStart(2, '0');
+  return `${nextYear}-${nextMonth}-${nextDay}`;
+}
+
+function toBeijingUtcStart(ymd: string) {
+  return new Date(`${normalizeYmd(ymd)}T00:00:00+08:00`).toISOString();
+}
+
+function applyBeijingBindDateRange<T extends { gte: Function; lt: Function }>(
+  query: T,
+  startDate?: string,
+  endDate?: string
+) {
+  let nextQuery = query;
+  const normalizedStart = normalizeYmd(startDate);
+  const normalizedEnd = normalizeYmd(endDate);
+
+  if (normalizedStart) {
+    nextQuery = nextQuery.gte('bind_time', toBeijingUtcStart(normalizedStart));
+  }
+  if (normalizedEnd) {
+    nextQuery = nextQuery.lt('bind_time', toBeijingUtcStart(addDaysYmd(normalizedEnd, 1)));
+  }
+
+  return nextQuery;
+}
+
 function formatDashboardUser(
   userId: string,
   inviteCode: string,
@@ -126,9 +165,8 @@ export async function POST(request: Request) {
         .from('attribution_users')
         .select('employee_id, platform_user_id, invite_code, bind_time')
         .eq('company_id', companyId);
-        
-      if (startDate) attributionQuery = attributionQuery.gte('bind_time', startDate);
-      if (endDate) attributionQuery = attributionQuery.lte('bind_time', endDate + 'T23:59:59Z');
+      
+      attributionQuery = applyBeijingBindDateRange(attributionQuery, startDate, endDate);
 
       const [employeesResult, attributions, recharges] = await Promise.all([
         supabaseServer
@@ -258,9 +296,8 @@ export async function POST(request: Request) {
       .select('employee_id, platform_user_id, invite_code, bind_time')
       .eq('company_id', companyId)
       .eq('employee_id', employee.id);
-
-    if (startDate) attributionQuery = attributionQuery.gte('bind_time', startDate);
-    if (endDate) attributionQuery = attributionQuery.lte('bind_time', endDate + 'T23:59:59Z');
+    
+    attributionQuery = applyBeijingBindDateRange(attributionQuery, startDate, endDate);
 
     const [attributions, recharges] = await Promise.all([
       fetchAll<AttributionRow>(attributionQuery.order('bind_time', { ascending: false })),

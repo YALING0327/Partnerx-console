@@ -62,8 +62,12 @@ function fmt(value: number, lang: Lang) {
 
 function fmtDate(value: string | null, lang: Lang) {
   if (!value) return '-';
-  // 统一显示为北京时间（UTC+8），不随浏览器所在时区变化
-  return new Date(value).toLocaleString(langLocale(lang), { hour12: false, timeZone: 'Asia/Shanghai' });
+  const raw = String(value).trim();
+  return raw
+    .replace('T', ' ')
+    .replace(/\.\d+/, '')
+    .replace(/(?:Z|[+-]\d{2}:\d{2})$/, '')
+    .replace(/-/g, '/');
 }
 
 function exportCsv(filename: string, rows: string[][], headers: string[]) {
@@ -478,11 +482,11 @@ export default function DashboardPage() {
                       isBoss ? u.employeeName : '', // Only include employee name if boss
                       u.inviteCode,
                       u.source === 'adjust' ? (lang === 'zh' ? 'Adjust链接' : 'Adjust Link') : (lang === 'zh' ? '邀请码' : 'Invite Code'),
-                      u.bindTime ? new Date(u.bindTime).toLocaleString('zh-CN', { hour12: false, timeZone: 'Asia/Shanghai' }) : '-', // Force string format for CSV to avoid Excel #####
-                      u.firstRechargeAt ? new Date(u.firstRechargeAt).toLocaleString('zh-CN', { hour12: false, timeZone: 'Asia/Shanghai' }) : '-',
+                      fmtDate(u.bindTime, 'zh'),
+                      fmtDate(u.firstRechargeAt, 'zh'),
                       String(u.rechargeCount),
                       String(((Number(u.totalAmount || 0) || 0) / 100).toFixed(2)),
-                      u.lastRechargeAt ? new Date(u.lastRechargeAt).toLocaleString('zh-CN', { hour12: false, timeZone: 'Asia/Shanghai' }) : '-'
+                      fmtDate(u.lastRechargeAt, 'zh')
                     ].filter(Boolean)); // filter(Boolean) removes the empty string if not boss
 
                     const headers = [
