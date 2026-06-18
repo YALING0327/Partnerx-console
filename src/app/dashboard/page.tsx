@@ -20,6 +20,9 @@ type BossEmployee = {
   inviterId: string | null;
   status: string;
   newUsers: number;
+  mergedUsers: number;
+  inviteUsers: number;
+  adjustUsers: number;
   paidUsers: number;
   totalAmount: number;
   arppu: number;
@@ -41,14 +44,31 @@ type DashboardData =
   | {
       role: 'boss';
       currentUser: { name: string | null; username: string };
-      summary: { newUsers: number; paidUsers: number; totalAmount: number; arppu: number; employeeCount: number };
+      summary: {
+        newUsers: number;
+        mergedUsers: number;
+        inviteUsers: number;
+        adjustUsers: number;
+        paidUsers: number;
+        totalAmount: number;
+        arppu: number;
+        employeeCount: number;
+      };
       employees: BossEmployee[];
       users: DashboardUser[];
     }
   | {
       role: 'staff';
       currentUser: { name: string | null; username: string };
-      summary: { newUsers: number; paidUsers: number; totalAmount: number; arppu: number };
+      summary: {
+        newUsers: number;
+        mergedUsers: number;
+        inviteUsers: number;
+        adjustUsers: number;
+        paidUsers: number;
+        totalAmount: number;
+        arppu: number;
+      };
       profile: { name: string; inviteCode: string; inviterId: string | null; status: string };
       users: DashboardUser[];
     };
@@ -330,7 +350,9 @@ export default function DashboardPage() {
             {view === 'home' && (
               <>
                 <section className={`statsGrid ${isBoss ? 'boss-grid' : 'staff-grid'}`}>
-                  <article className="statCard"><span>{t(lang, 'stat_new_users')}</span><strong>{data.summary.newUsers}</strong></article>
+                  <article className="statCard"><span>{t(lang, 'stat_merged_users')}</span><strong>{data.summary.mergedUsers}</strong></article>
+                  <article className="statCard"><span>{t(lang, 'stat_invite_users')}</span><strong>{data.summary.inviteUsers}</strong></article>
+                  <article className="statCard"><span>{t(lang, 'stat_adjust_users')}</span><strong>{data.summary.adjustUsers}</strong></article>
                   <article className="statCard"><span>{t(lang, 'stat_paid_users')}</span><strong>{data.summary.paidUsers}</strong></article>
                   <article className="statCard"><span>{t(lang, 'stat_total_amount')}</span><strong>{fmt(data.summary.totalAmount, lang)}</strong></article>
                   <article className="statCard"><span>{t(lang, 'stat_arppu')}</span><strong>{fmt(data.summary.arppu, lang)}</strong></article>
@@ -344,11 +366,11 @@ export default function DashboardPage() {
                     </div>
                     <div className="tableWrap">
                       <table className="dataTable">
-                        <thead><tr><th>{t(lang, 'th_employee')}</th><th>{t(lang, 'th_invite_code')}</th><th>{t(lang, 'th_inviter_id')}</th><th>{t(lang, 'th_new_users')}</th><th>{t(lang, 'th_paid_users')}</th><th>{t(lang, 'th_total_amount')}</th><th>{t(lang, 'th_status')}</th></tr></thead>
+                        <thead><tr><th>{t(lang, 'th_employee')}</th><th>{t(lang, 'th_invite_code')}</th><th>{t(lang, 'th_inviter_id')}</th><th>{t(lang, 'th_merged_users')}</th><th>{t(lang, 'th_invite_users')}</th><th>{t(lang, 'th_adjust_users')}</th><th>{t(lang, 'th_paid_users')}</th><th>{t(lang, 'th_total_amount')}</th><th>{t(lang, 'th_status')}</th></tr></thead>
                         <tbody>
                           {bossData.employees.map((emp) => (
                             <tr key={emp.id}>
-                              <td>{emp.name}</td><td>{emp.inviteCode}</td><td>{emp.inviterId || '-'}</td><td>{emp.newUsers}</td>
+                              <td>{emp.name}</td><td>{emp.inviteCode}</td><td>{emp.inviterId || '-'}</td><td>{emp.mergedUsers}</td><td>{emp.inviteUsers}</td><td>{emp.adjustUsers}</td>
                               <td>{emp.paidUsers}</td><td>{fmt(emp.totalAmount, lang)}</td>
                               <td><span className={emp.status === 'active' ? 'statusActive' : 'statusDisabled'}>{emp.status === 'active' ? t(lang, 'status_active') : t(lang, 'status_disabled')}</span></td>
                             </tr>
@@ -430,11 +452,11 @@ export default function DashboardPage() {
 
                     <div className="tableWrap">
                       <table className="dataTable">
-                        <thead><tr><th>{t(lang, 'th_employee_name')}</th><th>{t(lang, 'th_invite_code')}</th><th>{t(lang, 'th_inviter_id')}</th><th>{t(lang, 'th_new_users')}</th><th>{t(lang, 'th_paid_users')}</th><th>{t(lang, 'th_total_amount')}</th><th>{t(lang, 'th_status')}</th><th>{t(lang, 'th_action')}</th></tr></thead>
+                        <thead><tr><th>{t(lang, 'th_employee_name')}</th><th>{t(lang, 'th_invite_code')}</th><th>{t(lang, 'th_inviter_id')}</th><th>{t(lang, 'th_merged_users')}</th><th>{t(lang, 'th_invite_users')}</th><th>{t(lang, 'th_adjust_users')}</th><th>{t(lang, 'th_paid_users')}</th><th>{t(lang, 'th_total_amount')}</th><th>{t(lang, 'th_status')}</th><th>{t(lang, 'th_action')}</th></tr></thead>
                         <tbody>
                           {bossData?.employees.map((emp) => (
                             <tr key={emp.id}>
-                              <td>{emp.name}</td><td>{emp.inviteCode}</td><td>{emp.inviterId || '-'}</td><td>{emp.newUsers}</td>
+                              <td>{emp.name}</td><td>{emp.inviteCode}</td><td>{emp.inviterId || '-'}</td><td>{emp.mergedUsers}</td><td>{emp.inviteUsers}</td><td>{emp.adjustUsers}</td>
                               <td>{emp.paidUsers}</td><td>{fmt(emp.totalAmount, lang)}</td>
                               <td><span className={emp.status === 'active' ? 'statusActive' : 'statusDisabled'}>{emp.status === 'active' ? t(lang, 'status_active') : t(lang, 'status_disabled')}</span></td>
                               <td>

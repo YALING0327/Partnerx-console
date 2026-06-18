@@ -38,6 +38,8 @@ type RechargeRow = {
   status: string;
 };
 
+type AttributionSource = 'invite' | 'adjust';
+
 function normalizeYmd(value?: string) {
   const raw = String(value ?? '').trim();
   if (!raw) return '';
@@ -92,12 +94,7 @@ function formatDashboardUser(
     .map((item) => item.pay_time)
     .sort((a, b) => new Date(a).getTime() - new Date(b).getTime());
 
-  // 来源判断：归因键命中某员工的 attribution_key(campaign) -> Adjust 链接；否则 -> 邀请码
-  const source = bindStatus === 'adjust'
-    ? 'adjust'
-    : bindStatus === 'invite'
-      ? 'invite'
-      : (campaignKeys && inviteCode && campaignKeys.has(inviteCode) ? 'adjust' : 'invite');
+  const source = getAttributionSource(bindStatus, inviteCode, campaignKeys);
 
   return {
     platformUserId: userId,
@@ -112,8 +109,33 @@ function formatDashboardUser(
   };
 }
 
-function buildSummary(attributions: AttributionRow[], recharges: RechargeRow[]) {
+function getAttributionSource(
+  bindStatus?: string | null,
+  inviteCode?: string | null,
+  campaignKeys?: Set<string>
+): AttributionSource {
+  if (bindStatus === 'adjust') return 'adjust';
+  if (bindStatus === 'invite' || bindStatus === 'bound') return 'invite';
+  const normalizedInviteCode = String(inviteCode ?? '').trim();
+  return campaignKeys && normalizedInviteCode && campaignKeys.has(normalizedInviteCode) ? 'adjust' : 'invite';
+}
+
+function buildSummary(
+  attributions: AttributionRow[],
+  recharges: RechargeRow[],
+  campaignKeys?: Set<string>
+) {
   const attributedUserIds = new Set(attributions.map((item) => item.platform_user_id));
+  const inviteUserIds = new Set<string>();
+  const adjustUserIds = new Set<string>();
+  for (const item of attributions) {
+    const source = getAttributionSource(item.bind_status, item.invite_code, campaignKeys);
+    if (source === 'adjust') {
+      adjustUserIds.add(item.platform_user_id);
+    } else {
+      inviteUserIds.add(item.platform_user_id);
+    }
+  }
   const paidUserIds = new Set(
     recharges.filter((item) => item.status === 'success').map((item) => item.platform_user_id)
   );
@@ -123,6 +145,9 @@ function buildSummary(attributions: AttributionRow[], recharges: RechargeRow[]) 
 
   return {
     newUsers: attributedUserIds.size,
+    mergedUsers: attributedUserIds.size,
+    inviteUsers: inviteUserIds.size,
+    adjustUsers: adjustUserIds.size,
     paidUsers: paidUserIds.size,
     totalAmount,
     arppu: paidUserIds.size ? totalAmount / paidUserIds.size : 0
@@ -204,7 +229,7 @@ export async function POST(request: Request) {
         ? recharges.filter(r => validUserIds.has(r.platform_user_id))
         : recharges;
 
-      const summary = buildSummary(attributions, filteredRecharges);
+      const summary = buildSummary(attributions, filteredRecharges, campaignKeys);
 
       const { data: accountsData } = await supabaseServer
         .from('company_accounts')
@@ -215,7 +240,10 @@ export async function POST(request: Request) {
       const employeeRows = employees.map((employee) => {
         const employeeUsers = attributions.filter((item) => item.employee_id === employee.id);
         const employeeOrders = filteredRecharges.filter((item) => item.employee_id === employee.id);
-        const employeeSummary = buildSummary(employeeUsers, employeeOrders);
+        const employeeCampaignKeys = new Set(
+          [String(employee.attribution_key ?? '').trim()].filter(Boolean)
+        );
+        const employeeSummary = buildSummary(employeeUsers, employeeOrders, employeeCampaignKeys);
         return { 
           id: employee.id, 
           name: employee.employee_name, 
@@ -318,7 +346,7 @@ export async function POST(request: Request) {
       ? recharges.filter(r => validUserIds.has(r.platform_user_id))
       : recharges;
 
-    const summary = buildSummary(attributions, filteredRecharges);
+    const summary = buildSummary(attributions, filteredRecharges, staffCampaignKeys);
     const ordersByUser = new Map<string, RechargeRow[]>();
     for (const order of filteredRecharges) {
       const current = ordersByUser.get(order.platform_user_id) ?? [];

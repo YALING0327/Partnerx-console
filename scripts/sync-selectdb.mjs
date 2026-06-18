@@ -23,7 +23,14 @@ function required(name) {
 
 function toIso(value) {
   if (!value) return new Date().toISOString();
-  const time = new Date(value);
+  const raw = String(value).trim();
+  const numericValue = Number(raw);
+  const normalizedValue = /^\d{13}$/.test(raw)
+    ? numericValue
+    : /^\d{10}$/.test(raw)
+      ? numericValue * 1000
+      : value;
+  const time = new Date(normalizedValue);
   if (Number.isNaN(time.getTime())) {
     throw new Error(`时间字段格式不正确: ${value}`);
   }
@@ -32,10 +39,17 @@ function toIso(value) {
 
 function toKeysetTime(value) {
   if (!value) return '1970-01-01 00:00:00';
-  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/.test(value.trim())) {
-    return value.trim().slice(0, 19);
+  const raw = String(value).trim();
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/.test(raw)) {
+    return raw.slice(0, 19);
   }
-  const time = new Date(value);
+  const numericValue = Number(raw);
+  const normalizedValue = /^\d{13}$/.test(raw)
+    ? numericValue
+    : /^\d{10}$/.test(raw)
+      ? numericValue * 1000
+      : value;
+  const time = new Date(normalizedValue);
   if (Number.isNaN(time.getTime())) {
     throw new Error(`时间字段格式不正确: ${value}`);
   }
@@ -165,7 +179,16 @@ async function main() {
   );
 
   const attributionSql = stripTrailingSemicolon(
-    process.env.SELECTDB_ATTRIBUTION_SQL || required('SELECTDB_REGISTER_SQL')
+    process.env.SELECTDB_ATTRIBUTION_RAW_SQL || `
+      SELECT
+        CAST(properties['campaign'] AS STRING) AS campaign_key,
+        CAST(properties['sponsor'] AS STRING) AS sponsor_key,
+        account_id AS platform_user_id,
+        COALESCE(CAST(properties['register_time'] AS STRING), CAST(event_created_time AS STRING)) AS bind_time
+      FROM \`user\`
+      WHERE (properties['campaign'] IS NOT NULL AND properties['campaign'] != '')
+         OR (properties['sponsor'] IS NOT NULL AND properties['sponsor'] != '')
+    `
   );
   const rechargeSql = stripTrailingSemicolon(required('SELECTDB_RECHARGE_SQL'));
 
@@ -232,15 +255,17 @@ async function main() {
         const cache = new Map();
 
         while (true) {
-          const normalizedInviteExpr = `LOWER(TRIM(CAST(t.invite_code AS STRING)))`;
-          const inviteFilterSql = inviteFilterKeys.length === 1
-            ? ` AND ${normalizedInviteExpr} = ${mysql.escape(inviteFilterKeys[0])}`
-            : ` AND ${normalizedInviteExpr} IN (${inviteFilterKeys.map(k => mysql.escape(k)).join(',')})`;
+          const normalizedCampaignExpr = `LOWER(TRIM(CAST(t.campaign_key AS STRING)))`;
+          const normalizedSponsorExpr = `LOWER(TRIM(CAST(t.sponsor_key AS STRING)))`;
+          const inviteMatchSql = inviteFilterKeys.length === 1
+            ? `(${normalizedCampaignExpr} = ${mysql.escape(inviteFilterKeys[0])} OR ${normalizedSponsorExpr} = ${mysql.escape(inviteFilterKeys[0])})`
+            : `(${normalizedCampaignExpr} IN (${inviteFilterKeys.map(k => mysql.escape(k)).join(',')}) OR ${normalizedSponsorExpr} IN (${inviteFilterKeys.map(k => mysql.escape(k)).join(',')}))`;
+          const inviteFilterSql = ` AND ${inviteMatchSql}`;
           
           // 注意：去掉了 t.bind_time > ? 的过滤，因为对于 IN 查询，业务库全表扫描过滤更慢。
           // 我们直接依赖 IN (邀请码) 走二级索引（如果存在），或者直接全量返回这些邀请码的数据
           const sql = `
-            SELECT t.invite_code, t.platform_user_id, t.bind_time
+            SELECT t.campaign_key, t.sponsor_key, t.platform_user_id, t.bind_time
             FROM (${attributionSql}) t
             WHERE 1=1
             ${inviteFilterSql}
@@ -256,11 +281,12 @@ async function main() {
 
           const attributionByUser = new Map();
           for (const row of rows) {
-            const inviteCode = normalizeInviteCode(row.invite_code);
             const platformUserId = normalizeText(row.platform_user_id);
-            if (!inviteCode || !platformUserId) continue;
+            if (!platformUserId) continue;
 
-            const resolved = resolveEmployeeAttribution(inviteCode);
+            const campaignResolved = resolveEmployeeAttribution(row.campaign_key);
+            const sponsorResolved = resolveEmployeeAttribution(row.sponsor_key);
+            const resolved = campaignResolved ?? sponsorResolved;
             if (!resolved) continue;
 
             hit += 1;

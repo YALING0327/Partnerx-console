@@ -52,6 +52,9 @@ const dictionary = {
     load_failed: '加载失败',
 
     stat_new_users: '拉新总人数',
+    stat_merged_users: '合并拉新人数',
+    stat_invite_users: '邀请码人数',
+    stat_adjust_users: '链接人数',
     stat_paid_users: '总付费人数',
     stat_total_amount: '充值总金额',
     stat_arppu: 'ARPPU',
@@ -64,6 +67,9 @@ const dictionary = {
     th_invite_code: '邀请码',
     th_inviter_id: '邀请人ID',
     th_new_users: '拉新人数',
+    th_merged_users: '总拉新',
+    th_invite_users: '邀请码人数',
+    th_adjust_users: '链接人数',
     th_paid_users: '付费人数',
     th_total_amount: '充值总额',
     th_status: '状态',
@@ -167,6 +173,9 @@ const dictionary = {
     load_failed: 'Load failed',
 
     stat_new_users: 'New Users',
+    stat_merged_users: 'Merged Users',
+    stat_invite_users: 'Invite Users',
+    stat_adjust_users: 'Link Users',
     stat_paid_users: 'Paid Users',
     stat_total_amount: 'Total Revenue',
     stat_arppu: 'ARPPU',
@@ -179,6 +188,9 @@ const dictionary = {
     th_invite_code: 'Invite Code',
     th_inviter_id: 'Inviter ID',
     th_new_users: 'New Users',
+    th_merged_users: 'Merged Users',
+    th_invite_users: 'Invite Users',
+    th_adjust_users: 'Link Users',
     th_paid_users: 'Paid Users',
     th_total_amount: 'Revenue',
     th_status: 'Status',
@@ -259,4 +271,3 @@ export function t(lang: Lang, key: I18nKey): string {
 export function langLocale(lang: Lang): string {
   return lang === 'en' ? 'en-US' : 'zh-CN';
 }
-
