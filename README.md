@@ -120,6 +120,43 @@ crontab -e
 */10 * * * * cd /你的项目目录 && /usr/bin/env npm run sync:selectdb >> sync-selectdb.log 2>&1
 ```
 
+### 5.2 归因对账
+
+为了避免“原始 `user` 表里有用户，但 `attribution_users` 少人”这种情况，项目现在提供了按员工对账脚本：
+
+```bash
+npm run reconcile:attribution
+```
+
+常用参数：
+
+```bash
+# 只看有差异的员工
+npm run reconcile:attribution -- --diff-only
+
+# 只看某个 company
+npm run reconcile:attribution -- --company <company_id>
+
+# 以 JSON 输出，方便告警或脚本处理
+npm run reconcile:attribution -- --diff-only --json
+```
+
+脚本会按员工输出这些口径：
+
+- `rawInviteUsers`：SelectDB 原始 `sponsor` 命中的用户数
+- `rawAdjustUsers`：SelectDB 原始 `campaign` 命中的用户数
+- `rawMergedUsers`：原始合并后的总人数
+- `dbInviteUsers`：`attribution_users` 中来源为邀请码的用户数
+- `dbAdjustUsers`：`attribution_users` 中来源为链接的用户数
+- `dbMergedUsers`：后台当前合并后的总人数
+- `diff*`：原始数据与后台数据的差值
+
+建议在服务器上每天至少跑一次：
+
+```cron
+15 * * * * cd /root/Partnerx-console && /usr/bin/env npm run reconcile:attribution -- --diff-only >> /root/Partnerx-console/reconcile-attribution.log 2>&1
+```
+
 ### 6. 脚本会写入哪些表
 
 - `attribution_users`

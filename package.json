@@ -9,6 +9,7 @@
     "start": "next start",
     "sync:selectdb": "node scripts/sync-selectdb.mjs",
     "sync:selectdb:dry": "DRY_RUN=1 node scripts/sync-selectdb.mjs",
+    "reconcile:attribution": "node scripts/reconcile-attribution.mjs",
     "add:boss": "node scripts/create-boss.mjs"
   },
   "dependencies": {
