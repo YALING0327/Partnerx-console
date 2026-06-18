@@ -123,6 +123,10 @@ export default function DashboardPage() {
   const [endDate, setEndDate] = useState('');
   const [appliedStartDate, setAppliedStartDate] = useState('');
   const [appliedEndDate, setAppliedEndDate] = useState('');
+  const [metricStartDate, setMetricStartDate] = useState('');
+  const [metricEndDate, setMetricEndDate] = useState('');
+  const [appliedMetricStartDate, setAppliedMetricStartDate] = useState('');
+  const [appliedMetricEndDate, setAppliedMetricEndDate] = useState('');
   const [filterEmployee, setFilterEmployee] = useState('');
 
   // Employee creation form
@@ -166,14 +170,28 @@ export default function DashboardPage() {
     setLang(getStoredLang());
   }, []);
 
-  const loadDashboard = useCallback(async (u: StoredUser, sd: string, ed: string) => {
+  const loadDashboard = useCallback(async (
+    u: StoredUser,
+    sd: string,
+    ed: string,
+    msd: string,
+    med: string
+  ) => {
     setLoading(true);
     setError('');
     try {
       const res = await fetch('/api/dashboard/overview', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...u, userId: u.id, companyId: u.companyId, startDate: sd || undefined, endDate: ed || undefined })
+        body: JSON.stringify({
+          ...u,
+          userId: u.id,
+          companyId: u.companyId,
+          startDate: sd || undefined,
+          endDate: ed || undefined,
+          metricStartDate: msd || undefined,
+          metricEndDate: med || undefined
+        })
       });
       const result = await res.json() as DashboardData | { error: string };
       if (!res.ok) { setError('error' in result ? result.error : t(lang, 'load_failed')); return; }
@@ -186,8 +204,16 @@ export default function DashboardPage() {
   }, [lang]);
 
   useEffect(() => {
-    if (user) void loadDashboard(user, appliedStartDate, appliedEndDate);
-  }, [user, loadDashboard, appliedStartDate, appliedEndDate]);
+    if (user) {
+      void loadDashboard(
+        user,
+        appliedStartDate,
+        appliedEndDate,
+        appliedMetricStartDate,
+        appliedMetricEndDate
+      );
+    }
+  }, [user, loadDashboard, appliedStartDate, appliedEndDate, appliedMetricStartDate, appliedMetricEndDate]);
 
   async function handleAddEmployee(e: React.FormEvent) {
     e.preventDefault();
@@ -213,7 +239,7 @@ export default function DashboardPage() {
       if (!res.ok) { setFormError(result.error ?? '创建失败'); return; }
       setShowAddForm(false);
       setNewName(''); setNewUsername(''); setNewPassword(''); setNewInviteCode(''); setNewInviterId('');
-      void loadDashboard(user, appliedStartDate, appliedEndDate);
+      void loadDashboard(user, appliedStartDate, appliedEndDate, appliedMetricStartDate, appliedMetricEndDate);
     } catch (e) {
       setFormError(e instanceof Error ? e.message : '创建失败');
     } finally {
@@ -229,7 +255,7 @@ export default function DashboardPage() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ requesterId: user.id, requesterCompanyId: user.companyId, requesterRole: user.role, employeeId, action })
     });
-    void loadDashboard(user, appliedStartDate, appliedEndDate);
+    void loadDashboard(user, appliedStartDate, appliedEndDate, appliedMetricStartDate, appliedMetricEndDate);
   }
 
   async function handleEditEmployee(e: React.FormEvent) {
@@ -256,7 +282,7 @@ export default function DashboardPage() {
       const result = await res.json() as { message?: string; error?: string };
       if (!res.ok) { setEditFormError(result.error ?? '修改失败'); return; }
       setEditingEmployee(null);
-      void loadDashboard(user, appliedStartDate, appliedEndDate);
+      void loadDashboard(user, appliedStartDate, appliedEndDate, appliedMetricStartDate, appliedMetricEndDate);
     } catch (e) {
       setEditFormError(e instanceof Error ? e.message : '修改失败');
     } finally {
@@ -349,6 +375,30 @@ export default function DashboardPage() {
             {/* HOME VIEW */}
             {view === 'home' && (
               <>
+                {isBoss && (
+                  <section className="dashboardSection">
+                    <div className="sectionHead">
+                      <div>
+                        <p className="sectionLabel">{t(lang, 'home_filter_title')}</p>
+                        <h2>{t(lang, 'home_filter_title')}</h2>
+                      </div>
+                    </div>
+                    <div className="filterRow">
+                      <label className="filterField"><span>{t(lang, 'filter_start')}</span><input type="date" value={metricStartDate} onChange={(e) => setMetricStartDate(e.target.value)} /></label>
+                      <label className="filterField"><span>{t(lang, 'filter_end')}</span><input type="date" value={metricEndDate} onChange={(e) => setMetricEndDate(e.target.value)} /></label>
+                      <button className="addBtn" onClick={() => { setAppliedMetricStartDate(metricStartDate); setAppliedMetricEndDate(metricEndDate); }}>{t(lang, 'filter_search')}</button>
+                      {(metricStartDate || metricEndDate || appliedMetricStartDate || appliedMetricEndDate) && (
+                        <button className="cancelBtn" onClick={() => {
+                          setMetricStartDate('');
+                          setMetricEndDate('');
+                          setAppliedMetricStartDate('');
+                          setAppliedMetricEndDate('');
+                        }}>{t(lang, 'filter_clear')}</button>
+                      )}
+                    </div>
+                    <p className="dashboardBreadcrumb">{t(lang, 'home_filter_hint')}</p>
+                  </section>
+                )}
                 <section className={`statsGrid ${isBoss ? 'boss-grid' : 'staff-grid'}`}>
                   <article className="statCard"><span>{t(lang, 'stat_merged_users')}</span><strong>{data.summary.mergedUsers}</strong></article>
                   <article className="statCard"><span>{t(lang, 'stat_invite_users')}</span><strong>{data.summary.inviteUsers}</strong></article>

@@ -59,6 +59,8 @@ const dictionary = {
     stat_total_amount: '充值总金额',
     stat_arppu: 'ARPPU',
     stat_employee_count: '团队人数',
+    home_filter_title: '首页业绩筛选',
+    home_filter_hint: '拉新按绑定时间统计，充值按充值时间统计；老用户今天充值，算今天业绩。',
 
     section_team_overview: '团队概览',
     section_employee_performance: '员工与邀请码表现',
@@ -180,6 +182,8 @@ const dictionary = {
     stat_total_amount: 'Total Revenue',
     stat_arppu: 'ARPPU',
     stat_employee_count: 'Employees',
+    home_filter_title: 'Home Date Filter',
+    home_filter_hint: 'New users use bind time, recharge revenue uses pay time; revenue from old users today counts toward today.',
 
     section_team_overview: 'Team Overview',
     section_employee_performance: 'Employee Performance',
