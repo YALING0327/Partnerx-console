@@ -116,6 +116,13 @@ async function fetchAllEmployees(supabase) {
   return employees;
 }
 
+function pickPreferredAttribution(current, next) {
+  if (!current) return next;
+  if (current.source === 'invite') return current;
+  if (next.source === 'invite') return next;
+  return current;
+}
+
 function chunkArray(items, size) {
   const result = [];
   for (let i = 0; i < items.length; i += size) {
@@ -184,16 +191,30 @@ async function main() {
       console.log('开始读取 SelectDB 数据...');
 
       const employees = await fetchAllEmployees(supabase);
-      const employeeByInviteCode = new Map();
+      const employeeByDirectKey = new Map();
+      const employeeByAttributionKey = new Map();
       for (const employee of employees ?? []) {
         const inviteCodeKey = normalizeInviteCode(employee.invite_code);
-        if (inviteCodeKey) employeeByInviteCode.set(inviteCodeKey, employee);
+        if (inviteCodeKey) employeeByDirectKey.set(inviteCodeKey, employee);
         const inviterIdKey = normalizeInviteCode(employee.inviter_id);
-        if (inviterIdKey) employeeByInviteCode.set(inviterIdKey, employee);
+        if (inviterIdKey) employeeByDirectKey.set(inviterIdKey, employee);
         const attributionKey = normalizeInviteCode(employee.attribution_key);
-        if (attributionKey) employeeByInviteCode.set(attributionKey, employee);
+        if (attributionKey) employeeByAttributionKey.set(attributionKey, employee);
       }
-      const employeeInviteKeys = [...new Set([...employeeByInviteCode.keys()].filter(Boolean))];
+      const employeeInviteKeys = [...new Set([
+        ...employeeByDirectKey.keys(),
+        ...employeeByAttributionKey.keys()
+      ].filter(Boolean))];
+
+      function resolveEmployeeAttribution(rawKey) {
+        const normalizedKey = normalizeInviteCode(rawKey);
+        if (!normalizedKey) return null;
+        const directEmployee = employeeByDirectKey.get(normalizedKey);
+        if (directEmployee) return { employee: directEmployee, source: 'invite' };
+        const attributionEmployee = employeeByAttributionKey.get(normalizedKey);
+        if (attributionEmployee) return { employee: attributionEmployee, source: 'adjust' };
+        return null;
+      }
 
       const newKeys = employeeInviteKeys.filter(k => !cursor.synced_keys.includes(k));
       if (newKeys.length > 0 && !resetCursor) {
@@ -233,25 +254,31 @@ async function main() {
           read += rows.length;
           if (!isCatchUp) console.log(`归因批次读取: ${rows.length} 条（累计 ${read}）`);
 
-          const batchUpserts = [];
+          const attributionByUser = new Map();
           for (const row of rows) {
             const inviteCode = normalizeInviteCode(row.invite_code);
             const platformUserId = normalizeText(row.platform_user_id);
             if (!inviteCode || !platformUserId) continue;
 
-            const employee = employeeByInviteCode.get(inviteCode);
-            if (!employee) continue;
+            const resolved = resolveEmployeeAttribution(inviteCode);
+            if (!resolved) continue;
 
             hit += 1;
-            batchUpserts.push({
-              company_id: employee.company_id,
-              employee_id: employee.id,
+            const nextAttribution = {
+              company_id: resolved.employee.company_id,
+              employee_id: resolved.employee.id,
               platform_user_id: platformUserId,
-              invite_code: employee.invite_code,
+              invite_code: resolved.employee.invite_code,
               bind_time: toIso(row.bind_time),
-              bind_status: 'bound'
-            });
+              bind_status: resolved.source
+            };
+            attributionByUser.set(
+              platformUserId,
+              pickPreferredAttribution(attributionByUser.get(platformUserId), nextAttribution)
+            );
           }
+
+          const batchUpserts = [...attributionByUser.values()];
 
           for (const chunk of chunkArray(batchUpserts, 1000)) {
             if (!dryRun && chunk.length > 0) {
@@ -327,7 +354,8 @@ async function main() {
             if (!platformUserId || !orderNo) continue;
 
             const attribution = attributionCache.get(platformUserId);
-            const employee = inviteCode ? employeeByInviteCode.get(inviteCode) : null;
+            const resolved = inviteCode ? resolveEmployeeAttribution(inviteCode) : null;
+            const employee = resolved?.employee ?? null;
             const companyId = attribution?.company_id ?? employee?.company_id;
             const employeeId = attribution?.employee_id ?? employee?.id;
             if (!companyId || !employeeId) continue;

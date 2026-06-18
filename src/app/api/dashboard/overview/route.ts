@@ -27,6 +27,7 @@ type AttributionRow = {
   platform_user_id: string;
   invite_code: string;
   bind_time: string;
+  bind_status?: string | null;
 };
 
 type RechargeRow = {
@@ -82,7 +83,8 @@ function formatDashboardUser(
   employeeName: string,
   bindTime: string | null,
   orders: RechargeRow[],
-  campaignKeys?: Set<string>
+  campaignKeys?: Set<string>,
+  bindStatus?: string | null
 ) {
   const paidOrders = orders.filter((item) => item.status === 'success');
   const totalAmount = paidOrders.reduce((sum, item) => sum + Number(item.amount || 0), 0);
@@ -91,7 +93,11 @@ function formatDashboardUser(
     .sort((a, b) => new Date(a).getTime() - new Date(b).getTime());
 
   // 来源判断：归因键命中某员工的 attribution_key(campaign) -> Adjust 链接；否则 -> 邀请码
-  const source = campaignKeys && inviteCode && campaignKeys.has(inviteCode) ? 'adjust' : 'invite';
+  const source = bindStatus === 'adjust'
+    ? 'adjust'
+    : bindStatus === 'invite'
+      ? 'invite'
+      : (campaignKeys && inviteCode && campaignKeys.has(inviteCode) ? 'adjust' : 'invite');
 
   return {
     platformUserId: userId,
@@ -163,7 +169,7 @@ export async function POST(request: Request) {
 
       let attributionQuery = supabaseServer
         .from('attribution_users')
-        .select('employee_id, platform_user_id, invite_code, bind_time')
+        .select('employee_id, platform_user_id, invite_code, bind_time, bind_status')
         .eq('company_id', companyId);
       
       attributionQuery = applyBeijingBindDateRange(attributionQuery, startDate, endDate);
@@ -253,7 +259,8 @@ export async function POST(request: Request) {
           emp?.employee_name ?? '未知员工',
           attr?.bind_time ?? null,
           userOrders,
-          campaignKeys
+          campaignKeys,
+          attr?.bind_status ?? null
         );
       });
 
@@ -293,7 +300,7 @@ export async function POST(request: Request) {
 
     let attributionQuery = supabaseServer
       .from('attribution_users')
-      .select('employee_id, platform_user_id, invite_code, bind_time')
+      .select('employee_id, platform_user_id, invite_code, bind_time, bind_status')
       .eq('company_id', companyId)
       .eq('employee_id', employee.id);
     
@@ -341,7 +348,8 @@ export async function POST(request: Request) {
         employee.employee_name,
         attr?.bind_time ?? null,
         userOrders,
-        staffCampaignKeys
+        staffCampaignKeys,
+        attr?.bind_status ?? null
       );
     });
 
