@@ -211,9 +211,10 @@ async function main() {
         const cache = new Map();
 
         while (true) {
+          const normalizedInviteExpr = `LOWER(TRIM(CAST(t.invite_code AS STRING)))`;
           const inviteFilterSql = inviteFilterKeys.length === 1
-            ? ` AND t.invite_code = ${mysql.escape(inviteFilterKeys[0])}`
-            : ` AND t.invite_code IN (${inviteFilterKeys.map(k => mysql.escape(k)).join(',')})`;
+            ? ` AND ${normalizedInviteExpr} = ${mysql.escape(inviteFilterKeys[0])}`
+            : ` AND ${normalizedInviteExpr} IN (${inviteFilterKeys.map(k => mysql.escape(k)).join(',')})`;
           
           // 注意：去掉了 t.bind_time > ? 的过滤，因为对于 IN 查询，业务库全表扫描过滤更慢。
           // 我们直接依赖 IN (邀请码) 走二级索引（如果存在），或者直接全量返回这些邀请码的数据
@@ -288,9 +289,10 @@ async function main() {
         let hit = 0;
 
         while (true) {
+          const normalizedInviteExpr = `LOWER(TRIM(CAST(t.invite_code AS STRING)))`;
           const inviteFilterSql = inviteFilterKeys.length === 1
-            ? ` AND t.invite_code = ${mysql.escape(inviteFilterKeys[0])}`
-            : ` AND t.invite_code IN (${inviteFilterKeys.map(k => mysql.escape(k)).join(',')})`;
+            ? ` AND ${normalizedInviteExpr} = ${mysql.escape(inviteFilterKeys[0])}`
+            : ` AND ${normalizedInviteExpr} IN (${inviteFilterKeys.map(k => mysql.escape(k)).join(',')})`;
           
           const sql = `
             SELECT t.order_no, t.platform_user_id, t.invite_code, t.amount, t.pay_time, t.status
