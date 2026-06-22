@@ -138,7 +138,15 @@ const dictionary = {
     filter_all_employees: '全部员工',
     filter_search: '查找',
     filter_clear: '清除筛选',
-    empty: '暂无数据'
+    empty: '暂无数据',
+
+    section_team_today: '团队竞争榜',
+    section_team_today_title: '团队今日数据',
+    section_team_today_hint: '仅显示今天的付费用户和充值金额，按充值金额降序排列',
+    th_rank: '排名',
+    th_today_paid_users: '今日付费人数',
+    th_today_total_amount: '今日充值金额',
+    label_me: '我'
   },
   en: {
     language: 'Language',
@@ -261,7 +269,15 @@ const dictionary = {
     filter_all_employees: 'All',
     filter_search: 'Search',
     filter_clear: 'Clear',
-    empty: 'No data'
+    empty: 'No data',
+
+    section_team_today: 'Team Leaderboard',
+    section_team_today_title: 'Today\'s Team Performance',
+    section_team_today_hint: 'Showing only today\'s paid users and revenue, sorted by amount descending',
+    th_rank: 'Rank',
+    th_today_paid_users: 'Today\'s Paid Users',
+    th_today_total_amount: 'Today\'s Revenue',
+    label_me: 'Me'
   }
 } as const;
 

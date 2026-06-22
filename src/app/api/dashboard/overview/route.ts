@@ -58,6 +58,15 @@ function addDaysYmd(ymd: string, days: number) {
   return `${nextYear}-${nextMonth}-${nextDay}`;
 }
 
+function getTodayBeijing() {
+  const now = new Date();
+  const beijingTime = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Shanghai' }));
+  const year = beijingTime.getFullYear();
+  const month = String(beijingTime.getMonth() + 1).padStart(2, '0');
+  const day = String(beijingTime.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 function toBeijingUtcStart(ymd: string) {
   return new Date(`${normalizeYmd(ymd)}T00:00:00+08:00`).toISOString();
 }
@@ -379,20 +388,40 @@ export async function POST(request: Request) {
       .select('employee_id, platform_user_id, invite_code, bind_time, bind_status')
       .eq('company_id', companyId)
       .eq('employee_id', employee.id);
-    
+
     attributionQuery = applyBeijingBindDateRange(attributionQuery, startDate, endDate);
 
-    const [summaryAttributions, summaryRecharges, attributions, recharges] = await Promise.all([
+    // 查询今天的团队数据（所有同公司员工的今日付费数据）
+    const today = getTodayBeijing();
+    const { data: allEmployees } = await supabaseServer
+      .from('employees')
+      .select('id, employee_name, status')
+      .eq('company_id', companyId);
+
+    const activeEmployeeIds = (allEmployees ?? [])
+      .filter((e: { status: string }) => e.status === 'active')
+      .map((e: { id: string }) => e.id);
+
+    let todayTeamRechargeQuery = supabaseServer
+      .from('recharge_orders')
+      .select('employee_id, platform_user_id, amount, status')
+      .eq('company_id', companyId)
+      .in('employee_id', activeEmployeeIds);
+
+    todayTeamRechargeQuery = applyBeijingPayDateRange(todayTeamRechargeQuery, today, today);
+
+    const [summaryAttributions, summaryRecharges, attributions, recharges, todayTeamRecharges] = await Promise.all([
       fetchAll<AttributionRow>(summaryAttributionQuery.order('bind_time', { ascending: false })),
       fetchAll<RechargeRow>(summaryRechargeQuery.order('pay_time', { ascending: false })),
       fetchAll<AttributionRow>(attributionQuery.order('bind_time', { ascending: false })),
-      fetchAll<RechargeRow>(rechargeQuery.order('pay_time', { ascending: false }))
+      fetchAll<RechargeRow>(rechargeQuery.order('pay_time', { ascending: false })),
+      fetchAll<RechargeRow>(todayTeamRechargeQuery.order('pay_time', { ascending: false }))
     ]);
 
     const hasDateFilter = !!startDate || !!endDate;
     const validUserIds = new Set(attributions.map(a => a.platform_user_id));
-    
-    const filteredRecharges = hasDateFilter 
+
+    const filteredRecharges = hasDateFilter
       ? recharges.filter(r => validUserIds.has(r.platform_user_id))
       : recharges;
 
@@ -409,7 +438,7 @@ export async function POST(request: Request) {
       attributionMap.set(a.platform_user_id, a);
     }
 
-    const allUserIds = hasDateFilter 
+    const allUserIds = hasDateFilter
       ? new Set(attributions.map((a) => a.platform_user_id))
       : new Set([
           ...attributions.map((a) => a.platform_user_id),
@@ -419,7 +448,7 @@ export async function POST(request: Request) {
     const users = Array.from(allUserIds).map((platformUserId) => {
       const attr = attributionMap.get(platformUserId);
       const userOrders = ordersByUser.get(platformUserId) ?? [];
-      
+
       return formatDashboardUser(
         platformUserId,
         attr?.invite_code ?? employee.invite_code,
@@ -431,11 +460,35 @@ export async function POST(request: Request) {
       );
     });
 
+    // 构建今天的团队数据
+    const employeeMap = new Map((allEmployees ?? []).map((e: { id: string; employee_name: string }) => [e.id, e.employee_name]));
+    const todayTeamStatsMap = new Map<string, { paidUserIds: Set<string>; totalAmount: number }>();
+
+    for (const order of todayTeamRecharges) {
+      if (order.status !== 'success') continue;
+      const empId = order.employee_id;
+      if (!todayTeamStatsMap.has(empId)) {
+        todayTeamStatsMap.set(empId, { paidUserIds: new Set(), totalAmount: 0 });
+      }
+      const stats = todayTeamStatsMap.get(empId)!;
+      stats.paidUserIds.add(order.platform_user_id);
+      stats.totalAmount += Number(order.amount || 0);
+    }
+
+    const todayTeamStats = Array.from(todayTeamStatsMap.entries())
+      .map(([empId, stats]) => ({
+        name: employeeMap.get(empId) ?? '未知',
+        paidUsers: stats.paidUserIds.size,
+        totalAmount: stats.totalAmount
+      }))
+      .sort((a, b) => b.totalAmount - a.totalAmount); // 按充值金额降序
+
     return NextResponse.json({
       role,
       currentUser: { name: account.name, username: account.username },
       summary,
       profile: { name: employee.employee_name, inviteCode: employee.invite_code, inviterId: employee.inviter_id ?? null, status: employee.status },
+      todayTeamStats,
       users
     });
   } catch (error) {

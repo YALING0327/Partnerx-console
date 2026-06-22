@@ -70,6 +70,11 @@ type DashboardData =
         arppu: number;
       };
       profile: { name: string; inviteCode: string; inviterId: string | null; status: string };
+      todayTeamStats?: {
+        name: string;
+        paidUsers: number;
+        totalAmount: number;
+      }[];
       users: DashboardUser[];
     };
 
@@ -432,16 +437,62 @@ export default function DashboardPage() {
                 )}
 
                 {staffData && (
-                  <section className="dashboardSection">
-                    <div className="sectionHead"><div><p className="sectionLabel">{t(lang, 'section_profile')}</p><h2>{t(lang, 'section_my_invite_profile')}</h2></div></div>
-                    <div className="profileGrid">
-                      <article className="profileCard"><span>{t(lang, 'profile_name')}</span><strong>{staffData.profile.name}</strong></article>
-                      <article className="profileCard"><span>{t(lang, 'profile_invite_code')}</span><strong>{staffData.profile.inviteCode}</strong></article>
-                      <article className="profileCard"><span>{t(lang, 'profile_inviter_id')}</span><strong>{staffData.profile.inviterId || '-'}</strong></article>
-                      <article className="profileCard"><span>{t(lang, 'profile_account_status')}</span><strong>{staffData.profile.status === 'active' ? t(lang, 'status_active') : t(lang, 'status_disabled')}</strong></article>
-                      <article className="profileCard"><span>{t(lang, 'profile_username')}</span><strong>{staffData.currentUser.username}</strong></article>
-                    </div>
-                  </section>
+                  <>
+                    <section className="dashboardSection">
+                      <div className="sectionHead"><div><p className="sectionLabel">{t(lang, 'section_profile')}</p><h2>{t(lang, 'section_my_invite_profile')}</h2></div></div>
+                      <div className="profileGrid">
+                        <article className="profileCard"><span>{t(lang, 'profile_name')}</span><strong>{staffData.profile.name}</strong></article>
+                        <article className="profileCard"><span>{t(lang, 'profile_invite_code')}</span><strong>{staffData.profile.inviteCode}</strong></article>
+                        <article className="profileCard"><span>{t(lang, 'profile_inviter_id')}</span><strong>{staffData.profile.inviterId || '-'}</strong></article>
+                        <article className="profileCard"><span>{t(lang, 'profile_account_status')}</span><strong>{staffData.profile.status === 'active' ? t(lang, 'status_active') : t(lang, 'status_disabled')}</strong></article>
+                        <article className="profileCard"><span>{t(lang, 'profile_username')}</span><strong>{staffData.currentUser.username}</strong></article>
+                      </div>
+                    </section>
+
+                    {staffData.todayTeamStats && staffData.todayTeamStats.length > 0 && (
+                      <section className="dashboardSection">
+                        <div className="sectionHead">
+                          <div>
+                            <p className="sectionLabel">{t(lang, 'section_team_today')}</p>
+                            <h2>{t(lang, 'section_team_today_title')}</h2>
+                          </div>
+                        </div>
+                        <p className="dashboardBreadcrumb">{t(lang, 'section_team_today_hint')}</p>
+                        <div className="tableWrap">
+                          <table className="dataTable">
+                            <thead>
+                              <tr>
+                                <th>{t(lang, 'th_rank')}</th>
+                                <th>{t(lang, 'th_employee_name')}</th>
+                                <th>{t(lang, 'th_today_paid_users')}</th>
+                                <th>{t(lang, 'th_today_total_amount')}</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {staffData.todayTeamStats.map((emp, idx) => (
+                                <tr key={emp.name} className={emp.name === staffData.profile.name ? 'highlightRow' : ''}>
+                                  <td>
+                                    <strong style={{
+                                      color: idx === 0 ? '#d4af37' : idx === 1 ? '#c0c0c0' : idx === 2 ? '#cd7f32' : 'inherit',
+                                      fontSize: idx < 3 ? '1.1em' : 'inherit'
+                                    }}>
+                                      {idx + 1}
+                                    </strong>
+                                  </td>
+                                  <td>
+                                    <strong>{emp.name}</strong>
+                                    {emp.name === staffData.profile.name && <span style={{ marginLeft: 8, color: 'var(--primary)', fontSize: '0.85em' }}>({t(lang, 'label_me')})</span>}
+                                  </td>
+                                  <td>{emp.paidUsers}</td>
+                                  <td><strong>{fmt(emp.totalAmount, lang)}</strong></td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </section>
+                    )}
+                  </>
                 )}
               </>
             )}

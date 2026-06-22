@@ -66,7 +66,7 @@ export default function HomePage() {
         </select>
       </div>
       <div className="loginBox">
-        <h1 className="loginBrand">PARTNERX</h1>
+        <h1 className="loginBrand"><span>PARTNER</span>X</h1>
         <p className="loginSubtitle">{t(lang, 'login_title')}</p>
         <form onSubmit={handleSubmit}>
           <label className="field">
