@@ -925,13 +925,7 @@ function ChatView({ user, lang }: { user: StoredUser; lang: Lang }) {
                   : messages.map((m, i) => (
                     <div key={i} className={`chatRow ${m.dir}`}>
                       <div className={`chatBubble ${m.dir} ${m.kind}`}>
-                        {m.imageUrl ? (
-                          <a href={m.imageUrl} target="_blank" rel="noreferrer">
-                            <img className="chatImg" src={m.imageUrl} alt="img" loading="lazy" />
-                          </a>
-                        ) : (
-                          <div className="chatText">{m.text}</div>
-                        )}
+                        <div className="chatText">{m.text}</div>
                         {trans[i] && trans[i] !== m.text ? (
                           <div className="chatTrans"><span className="tl">{t(lang, 'chat_translation')}</span>{trans[i]}</div>
                         ) : null}
