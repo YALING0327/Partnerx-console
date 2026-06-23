@@ -75,6 +75,16 @@ function normalizeInviteCode(value) {
   return normalizeText(value).toLowerCase();
 }
 
+// 按 app_name(包名) 后缀判定用户来源平台：android / ios / unknown。
+// 安卓包：含 .android / .gp / dico；苹果包：含 .ios / mitu。channel 作兜底(dcg=安卓, mitu=苹果)。
+function detectPlatform(appName, channel) {
+  const a = normalizeText(appName).toLowerCase();
+  const c = normalizeText(channel).toLowerCase();
+  if (/\.ios\b|ios$|mitu/.test(a) || /ios|mitu/.test(c)) return 'ios';
+  if (/\.android\b|android$|\.gp\b|dico|dcg/.test(a) || /android|\bgp\b|dcg/.test(c)) return 'android';
+  return 'unknown';
+}
+
 function parseJsonObject(value) {
   if (!value) return null;
   if (typeof value === 'object') return value;
@@ -259,6 +269,8 @@ async function main() {
         CAST(properties['campaign'] AS STRING) AS campaign_key,
         CAST(properties['sponsor'] AS STRING) AS sponsor_key,
         account_id AS platform_user_id,
+        json_extract_string(CONCAT('', CAST(properties AS STRING)), '$.app_name') AS app_name,
+        json_extract_string(CONCAT('', CAST(properties AS STRING)), '$.channel') AS channel,
         COALESCE(CAST(properties['register_time'] AS STRING), CAST(event_created_time AS STRING)) AS bind_time
       FROM \`user\`
       WHERE (properties['campaign'] IS NOT NULL AND properties['campaign'] != '')
@@ -367,7 +379,7 @@ async function main() {
           // 注意：去掉了 t.bind_time > ? 的过滤，因为对于 IN 查询，业务库全表扫描过滤更慢。
           // 我们直接依赖 IN (邀请码) 走二级索引（如果存在），或者直接全量返回这些邀请码的数据
           const sql = `
-            SELECT t.campaign_key, t.sponsor_key, t.platform_user_id, t.bind_time
+            SELECT t.campaign_key, t.sponsor_key, t.platform_user_id, t.app_name, t.channel, t.bind_time
             FROM (${attributionSql}) t
             WHERE 1=1
             ${inviteFilterSql}
@@ -398,7 +410,8 @@ async function main() {
               platform_user_id: platformUserId,
               invite_code: resolved.employee.invite_code,
               bind_time: toIso(row.bind_time),
-              bind_status: resolved.source
+              bind_status: resolved.source,
+              app_platform: detectPlatform(row.app_name, row.channel)
             };
             attributionByUser.set(
               platformUserId,

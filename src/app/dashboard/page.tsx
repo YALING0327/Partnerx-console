@@ -24,6 +24,8 @@ type BossEmployee = {
   inviteUsers: number;
   adjustUsers: number;
   paidUsers: number;
+  androidUsers?: number;
+  iosUsers?: number;
   totalAmount: number;
   arppu: number;
 };
@@ -34,6 +36,7 @@ type DashboardUser = {
   inviteCode: string;
   bindTime: string | null;
   source?: 'adjust' | 'invite';
+  appPlatform?: 'android' | 'ios' | 'unknown';
   firstRechargeAt: string | null;
   lastRechargeAt: string | null;
   rechargeCount: number;
@@ -50,6 +53,8 @@ type DashboardData =
         inviteUsers: number;
         adjustUsers: number;
         paidUsers: number;
+        androidUsers: number;
+        iosUsers: number;
         totalAmount: number;
         arppu: number;
         employeeCount: number;
@@ -66,6 +71,8 @@ type DashboardData =
         inviteUsers: number;
         adjustUsers: number;
         paidUsers: number;
+        androidUsers: number;
+        iosUsers: number;
         totalAmount: number;
         arppu: number;
       };
@@ -83,6 +90,12 @@ type View = 'home' | 'employees' | 'users' | 'chat';
 function fmt(value: number, lang: Lang) {
   const dollars = (Number(value || 0) || 0) / 100;
   return new Intl.NumberFormat(langLocale(lang), { style: 'currency', currency: 'USD', currencyDisplay: 'narrowSymbol', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(dollars);
+}
+
+function platformLabel(p: 'android' | 'ios' | 'unknown' | undefined, lang: Lang) {
+  if (p === 'android') return lang === 'zh' ? '🤖 安卓' : '🤖 Android';
+  if (p === 'ios') return lang === 'zh' ? '🍎 苹果' : '🍎 iOS';
+  return '—';
 }
 
 function fmtDate(value: string | null, lang: Lang) {
@@ -413,6 +426,8 @@ export default function DashboardPage() {
                   <article className="statCard"><span>{t(lang, 'stat_invite_users')}</span><strong>{data.summary.inviteUsers}</strong></article>
                   <article className="statCard"><span>{t(lang, 'stat_adjust_users')}</span><strong>{data.summary.adjustUsers}</strong></article>
                   <article className="statCard"><span>{t(lang, 'stat_paid_users')}</span><strong>{data.summary.paidUsers}</strong></article>
+                  <article className="statCard"><span>{t(lang, 'stat_android_users')}</span><strong>🤖 {data.summary.androidUsers ?? 0}</strong></article>
+                  <article className="statCard"><span>{t(lang, 'stat_ios_users')}</span><strong>🍎 {data.summary.iosUsers ?? 0}</strong></article>
                   <article className="statCard"><span>{t(lang, 'stat_total_amount')}</span><strong>{fmt(data.summary.totalAmount, lang)}</strong></article>
                   <article className="statCard"><span>{t(lang, 'stat_arppu')}</span><strong>{fmt(data.summary.arppu, lang)}</strong></article>
                   {bossData && <article className="statCard"><span>{t(lang, 'stat_employee_count')}</span><strong>{bossData.summary.employeeCount}</strong></article>}
@@ -609,6 +624,7 @@ export default function DashboardPage() {
                       isBoss ? u.employeeName : '', // Only include employee name if boss
                       u.inviteCode,
                       u.source === 'adjust' ? (lang === 'zh' ? 'Adjust链接' : 'Adjust Link') : (lang === 'zh' ? '邀请码' : 'Invite Code'),
+                      platformLabel(u.appPlatform, lang).replace(/^[^\s]+\s/, ''),
                       fmtDate(u.bindTime, 'zh'),
                       fmtDate(u.firstRechargeAt, 'zh'),
                       String(u.rechargeCount),
@@ -621,6 +637,7 @@ export default function DashboardPage() {
                       isBoss ? t(lang, 'export_h_employee') : '',
                       t(lang, 'export_h_invite_code'),
                       lang === 'zh' ? '来源' : 'Source',
+                      t(lang, 'th_platform'),
                       t(lang, 'export_h_bind_time'),
                       t(lang, 'export_h_first_recharge'),
                       t(lang, 'export_h_recharge_count'),
@@ -656,7 +673,7 @@ export default function DashboardPage() {
                       <tr>
                         <th>{t(lang, 'export_h_user_id')}</th>
                         {isBoss && <th>{t(lang, 'export_h_employee')}</th>}
-                        <th>{t(lang, 'export_h_invite_code')}</th><th>{lang === 'zh' ? '来源' : 'Source'}</th><th>{t(lang, 'export_h_bind_time')}</th><th>{t(lang, 'export_h_first_recharge')}</th><th>{t(lang, 'export_h_recharge_count')}</th><th>{t(lang, 'export_h_total_amount')}</th><th>{t(lang, 'export_h_last_recharge')}</th>
+                        <th>{t(lang, 'export_h_invite_code')}</th><th>{lang === 'zh' ? '来源' : 'Source'}</th><th>{t(lang, 'th_platform')}</th><th>{t(lang, 'export_h_bind_time')}</th><th>{t(lang, 'export_h_first_recharge')}</th><th>{t(lang, 'export_h_recharge_count')}</th><th>{t(lang, 'export_h_total_amount')}</th><th>{t(lang, 'export_h_last_recharge')}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -676,12 +693,13 @@ export default function DashboardPage() {
                               {item.source === 'adjust' ? (lang === 'zh' ? 'Adjust链接' : 'Adjust Link') : (lang === 'zh' ? '邀请码' : 'Invite Code')}
                             </span>
                           </td>
+                          <td>{platformLabel(item.appPlatform, lang)}</td>
                           <td>{fmtDate(item.bindTime, lang)}</td>
                           <td>{fmtDate(item.firstRechargeAt, lang)}</td><td>{item.rechargeCount}</td>
                           <td>{fmt(item.totalAmount, lang)}</td><td>{fmtDate(item.lastRechargeAt, lang)}</td>
                         </tr>
                       )) : (
-                        <tr><td colSpan={isBoss ? 9 : 8}>{t(lang, 'empty')}</td></tr>
+                        <tr><td colSpan={isBoss ? 10 : 9}>{t(lang, 'empty')}</td></tr>
                       )}
                     </tbody>
                   </table>

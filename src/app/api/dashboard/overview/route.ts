@@ -30,6 +30,7 @@ type AttributionRow = {
   invite_code: string;
   bind_time: string;
   bind_status?: string | null;
+  app_platform?: string | null;
 };
 
 type RechargeRow = {
@@ -109,6 +110,12 @@ function applyBeijingPayDateRange<T extends { gte: Function; lt: Function }>(
   return nextQuery;
 }
 
+function normalizePlatform(value?: string | null): 'android' | 'ios' | 'unknown' {
+  const v = String(value ?? '').toLowerCase();
+  if (v === 'android' || v === 'ios') return v;
+  return 'unknown';
+}
+
 function formatDashboardUser(
   userId: string,
   inviteCode: string,
@@ -116,7 +123,8 @@ function formatDashboardUser(
   bindTime: string | null,
   orders: RechargeRow[],
   campaignKeys?: Set<string>,
-  bindStatus?: string | null
+  bindStatus?: string | null,
+  appPlatform?: string | null
 ) {
   const paidOrders = orders.filter((item) => item.status === 'success');
   const totalAmount = paidOrders.reduce((sum, item) => sum + Number(item.amount || 0), 0);
@@ -132,6 +140,7 @@ function formatDashboardUser(
     inviteCode,
     bindTime,
     source,
+    appPlatform: normalizePlatform(appPlatform),
     firstRechargeAt: sortedTimes[0] ?? null,
     lastRechargeAt: sortedTimes[sortedTimes.length - 1] ?? null,
     rechargeCount: paidOrders.length,
@@ -173,12 +182,27 @@ function buildSummary(
     .filter((item) => item.status === 'success')
     .reduce((sum, item) => sum + Number(item.amount || 0), 0);
 
+  // 按用户统计来源平台（每个用户取其归因记录的 app_platform，去重计数）
+  const platformByUser = new Map<string, string>();
+  for (const item of attributions) {
+    if (!platformByUser.has(item.platform_user_id)) {
+      platformByUser.set(item.platform_user_id, normalizePlatform(item.app_platform));
+    }
+  }
+  let androidUsers = 0, iosUsers = 0;
+  for (const p of platformByUser.values()) {
+    if (p === 'android') androidUsers++;
+    else if (p === 'ios') iosUsers++;
+  }
+
   return {
     newUsers: attributedUserIds.size,
     mergedUsers: attributedUserIds.size,
     inviteUsers: inviteUserIds.size,
     adjustUsers: adjustUserIds.size,
     paidUsers: paidUserIds.size,
+    androidUsers,
+    iosUsers,
     totalAmount,
     arppu: paidUserIds.size ? totalAmount / paidUserIds.size : 0
   };
@@ -221,7 +245,7 @@ export async function POST(request: Request) {
 
       let summaryAttributionQuery = supabaseServer
         .from('attribution_users')
-        .select('employee_id, platform_user_id, invite_code, bind_time, bind_status')
+        .select('employee_id, platform_user_id, invite_code, bind_time, bind_status, app_platform')
         .eq('company_id', companyId);
 
       summaryAttributionQuery = applyBeijingBindDateRange(summaryAttributionQuery, metricStartDate, metricEndDate);
@@ -234,7 +258,7 @@ export async function POST(request: Request) {
 
       let userAttributionQuery = supabaseServer
         .from('attribution_users')
-        .select('employee_id, platform_user_id, invite_code, bind_time, bind_status')
+        .select('employee_id, platform_user_id, invite_code, bind_time, bind_status, app_platform')
         .eq('company_id', companyId);
 
       userAttributionQuery = applyBeijingBindDateRange(userAttributionQuery, startDate, endDate);
@@ -330,7 +354,8 @@ export async function POST(request: Request) {
           attr?.bind_time ?? null,
           userOrders,
           campaignKeys,
-          attr?.bind_status ?? null
+          attr?.bind_status ?? null,
+          attr?.app_platform ?? null
         );
       });
 
@@ -368,7 +393,7 @@ export async function POST(request: Request) {
 
     let summaryAttributionQuery = supabaseServer
       .from('attribution_users')
-      .select('employee_id, platform_user_id, invite_code, bind_time, bind_status')
+      .select('employee_id, platform_user_id, invite_code, bind_time, bind_status, app_platform')
       .eq('company_id', companyId)
       .eq('employee_id', employee.id);
 
@@ -385,7 +410,7 @@ export async function POST(request: Request) {
 
     let attributionQuery = supabaseServer
       .from('attribution_users')
-      .select('employee_id, platform_user_id, invite_code, bind_time, bind_status')
+      .select('employee_id, platform_user_id, invite_code, bind_time, bind_status, app_platform')
       .eq('company_id', companyId)
       .eq('employee_id', employee.id);
 
@@ -456,7 +481,8 @@ export async function POST(request: Request) {
         attr?.bind_time ?? null,
         userOrders,
         staffCampaignKeys,
-        attr?.bind_status ?? null
+        attr?.bind_status ?? null,
+        attr?.app_platform ?? null
       );
     });
 
