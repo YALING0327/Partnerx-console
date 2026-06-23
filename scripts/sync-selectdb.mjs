@@ -97,50 +97,49 @@ function toFiniteNumber(value) {
   return Number.isFinite(numeric) ? numeric : null;
 }
 
-// 从 recharge.properties 取「真实付费美元」。
-// 源表 properties 是 variant：properties['price_dollar'] / ['goods_amount'] 可直接当作独立 key 取出，
-// 值是美元字符串(如 "2.99")。而 properties['amount']=299 是平台内部代币数(≈美元×100)，不是美元。
-// 历史 bug：旧逻辑取 amount(代币数) 当金额 → 放大 ~100 倍；或解析失败落到 0(显示 $0.00)。
-// 正确口径：price_dollar(实付美元) → goods_amount(标价美元) → income_dollar(净收入美元)。
-function pickUsdFromObject(obj) {
+// 返回充值金额，单位「美元分」(前端 fmt() 会 ÷100 显示，历史数据存的也是分)。
+// 源表 properties 是 variant：内层 amount 即「美元分」(== price_dollar × 100，已验证 3000/3000 相等)，
+//   如 amount=299 ⇔ price_dollar="2.99"。price_dollar/goods_amount/income_dollar 是「美元」字符串。
+// 历史 bug：① 解析失败把 amount 当 0 → 显示 $0.00；② 上一轮误改成存美元(2.99) → 前端÷100 显示 $0.03。
+// 口径：优先用内层 amount(分)；缺失时用 price_dollar→goods_amount→income_dollar(美元)×100 折算为分。
+function usdToCents(usd) {
+  return Math.round(usd * 100);
+}
+function pickUsdCentsFromObject(obj) {
   if (!obj || typeof obj !== 'object') return null;
+  // 内层 amount 本身就是分，直接用
+  const inner = toFiniteNumber(obj.amount);
+  if (inner != null && inner > 0) return inner;
   for (const candidate of [obj.price_dollar, obj.goods_amount, obj.income_dollar]) {
     const numeric = toFiniteNumber(candidate);
-    if (numeric != null && numeric > 0) return numeric;
+    if (numeric != null && numeric > 0) return usdToCents(numeric);
   }
   return null;
 }
 
 function extractRechargeAmount(row) {
-  // 1) 直接列：SQL 已把 price_dollar/goods_amount/income_dollar 选为独立列
-  for (const candidate of [row.price_dollar, row.goods_amount, row.income_dollar]) {
-    const numeric = toFiniteNumber(candidate);
-    if (numeric != null && numeric > 0) return numeric;
-  }
-
-  // 2) 若 amount 本身是嵌套 JSON 对象(部分取数路径会返回整坨)，从里面取美元字段
+  // 1) amount 若是嵌套 JSON(派生表上下文常见)：内层 amount(分) 优先，否则 price_dollar×100
   const amountObj = parseJsonObject(row.amount);
   if (amountObj) {
-    const usd = pickUsdFromObject(amountObj);
-    if (usd != null) return usd;
+    const cents = pickUsdCentsFromObject(amountObj);
+    if (cents != null) return cents;
   }
 
-  // 3) 旧的 usd_amount 嵌套对象兼容
+  // 2) amount 若是标量数字：它本身就是「美元分」
+  const scalarCents = toFiniteNumber(row.amount);
+  if (scalarCents != null && scalarCents > 0) return scalarCents;
+
+  // 3) 直接列 price_dollar/goods_amount/income_dollar(美元) × 100
+  for (const candidate of [row.price_dollar, row.goods_amount, row.income_dollar]) {
+    const numeric = toFiniteNumber(candidate);
+    if (numeric != null && numeric > 0) return usdToCents(numeric);
+  }
+
+  // 4) 旧的 usd_amount 嵌套对象兼容
   const usdAmount = parseJsonObject(row.usd_amount);
   if (usdAmount) {
-    const usd = pickUsdFromObject(usdAmount);
-    if (usd != null) return usd;
-    for (const candidate of [usdAmount.amount, usdAmount.pay_amount, usdAmount.order_amount]) {
-      const numeric = toFiniteNumber(candidate);
-      if (numeric != null) return numeric;
-    }
-  }
-
-  // 4) 最后兜底：只有代币数 amount → 估算美元(代币/100)，并告警
-  const tokenCents = toFiniteNumber(parseJsonObject(row.amount)?.amount ?? row.amount);
-  if (tokenCents != null && tokenCents > 0) {
-    console.warn(`[amount] 订单 ${row.order_no ?? ''} 无美元字段，按 amount/100 估算: ${tokenCents} -> ${tokenCents / 100}`);
-    return tokenCents / 100;
+    const cents = pickUsdCentsFromObject(usdAmount);
+    if (cents != null) return cents;
   }
 
   return 0;
