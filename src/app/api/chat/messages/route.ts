@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { authenticate, assertInviterVisible, type ChatAuthBody } from '@/lib/chat-auth';
 import { querySelectDB } from '@/lib/selectdb';
-import { parseImMsg } from '@/lib/chat-parse';
+import { parseImMsg, safeJson } from '@/lib/chat-parse';
 
 type Body = ChatAuthBody & { inviterId?: string; peerId?: string; days?: number };
 
@@ -45,15 +45,13 @@ export async function POST(request: Request) {
       const dir = m.sender === inviterId ? 'out' : 'in';
       messages.push({ dir, text: m.text, kind: m.kind, violation: m.violation, time: r.t });
       if (dir === 'in' && !peer.nickname) {
-        try {
-          const u = JSON.parse(r.usr);
-          if (u) {
-            peer.nickname = u.nickname ?? '';
-            peer.country = u.country ?? '';
-            peer.gender = u.gender ?? '';
-            peer.firstRecharge = u.first_recharge_time ?? '';
-          }
-        } catch { /* ignore */ }
+        const u = safeJson(r.usr);
+        if (u) {
+          peer.nickname = u.nickname ?? '';
+          peer.country = u.country ?? '';
+          peer.gender = u.gender ?? '';
+          peer.firstRecharge = u.first_recharge_time ?? '';
+        }
       }
     }
 

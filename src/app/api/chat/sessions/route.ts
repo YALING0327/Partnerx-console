@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { authenticate, assertInviterVisible, type ChatAuthBody } from '@/lib/chat-auth';
 import { querySelectDB } from '@/lib/selectdb';
-import { parseImMsg } from '@/lib/chat-parse';
+import { parseImMsg, safeJson } from '@/lib/chat-parse';
 
 type Body = ChatAuthBody & { inviterId?: string; days?: number };
 
@@ -54,15 +54,13 @@ export async function POST(request: Request) {
 
       // 对方资料：当这条由对方发出(sender=peer)，user 字段是对方
       if (m.sender === peer && !s.nickname) {
-        try {
-          const u = JSON.parse(r.usr);
-          if (u) {
-            s.nickname = u.nickname ?? '';
-            s.country = u.country ?? '';
-            s.gender = u.gender ?? '';
-            s.firstRecharge = u.first_recharge_time ?? '';
-          }
-        } catch { /* ignore */ }
+        const u = safeJson(r.usr);
+        if (u) {
+          s.nickname = u.nickname ?? '';
+          s.country = u.country ?? '';
+          s.gender = u.gender ?? '';
+          s.firstRecharge = u.first_recharge_time ?? '';
+        }
       }
     }
 

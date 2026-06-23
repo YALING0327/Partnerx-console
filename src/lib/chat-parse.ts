@@ -9,9 +9,20 @@ export type ParsedMsg = {
   sendTime: string | null;
 };
 
-export function parseImMsg(propsStr: string): ParsedMsg | null {
+// 安全解析可能是字符串或已被 mysql2 自动解析成对象的 JSON 列
+export function safeJson(v: string | object | null | undefined): any {
+  if (v == null) return null;
+  if (typeof v === 'object') return v;
+  try { return JSON.parse(String(v)); } catch { return null; }
+}
+
+export function parseImMsg(props: string | object): ParsedMsg | null {
   let p: any;
-  try { p = JSON.parse(propsStr); } catch { return null; }
+  if (props && typeof props === 'object') {
+    p = props; // mysql2 对 JSON 列可能已自动解析成对象
+  } else {
+    try { p = JSON.parse(String(props)); } catch { return null; }
+  }
   if (!p || typeof p !== 'object') return null;
   const info = p.im_msg_info || {};
   const type = info.message_type;
