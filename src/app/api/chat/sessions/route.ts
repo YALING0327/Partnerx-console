@@ -39,7 +39,8 @@ export async function POST(request: Request) {
       const s = rows[0];
       let manualParse = null;
       try { manualParse = typeof s?.props === 'string' ? JSON.parse(s.props)?.account_id : 'NOT_STRING'; } catch (e: any) { manualParse = 'PARSE_ERR:' + e.message; }
-      console.log('[chat/sessions] rows=', rows.length, 'propsType=', typeof s?.props, 'ctor=', s?.props?.constructor?.name, 'manualAccId=', manualParse, 'senderType=', typeof s?.sender, 'sender=', s?.sender, 'inviterId=', inviterId, typeof inviterId);
+      const pm = parseImMsg(s?.props);
+      console.log('[chat/sessions] rows=', rows.length, 'propsType=', typeof s?.props, 'directAccId=', (s?.props as any)?.account_id, 'parseImMsg=', JSON.stringify(pm), 'inviterId=', inviterId);
     }
 
     type Sess = { peerId: string; nickname: string; country: string; gender: string; firstRecharge: string; lastTime: string; lastText: string; msgCount: number };
