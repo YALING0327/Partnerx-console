@@ -35,6 +35,11 @@ export async function POST(request: Request) {
       [days, inviterId, inviterId]
     );
 
+    if (process.env.CHAT_DEBUG === '1') {
+      const sample = rows[0];
+      console.log('[chat/sessions DEBUG] rows=', rows.length, 'propsType=', typeof sample?.props, 'parse=', JSON.stringify(parseImMsg(sample?.props)), 'inviterId=', inviterId);
+    }
+
     type Sess = { peerId: string; nickname: string; country: string; gender: string; firstRecharge: string; lastTime: string; lastText: string; msgCount: number };
     const map = new Map<string, Sess>();
     for (const r of rows) {
