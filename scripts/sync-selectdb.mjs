@@ -97,16 +97,47 @@ function toFiniteNumber(value) {
   return Number.isFinite(numeric) ? numeric : null;
 }
 
+// 从 recharge.properties 里取「真实付费美元」。
+// 注意：源数据中 properties['amount'] 多为一整坨嵌套 JSON 字符串，例如
+//   {"amount":299,"goods_amount":"2.99","price_dollar":"2.99","income_dollar":"2.09",...}
+// 其中 amount(299) 是平台内部代币数(≈美元×100)，price_dollar/goods_amount 才是美元。
+// 历史 bug：旧逻辑直接把 amount 当数字 → 嵌套 JSON 解析失败落到 0(显示 $0.00)，
+//          或取到 299 → 比真实金额大 ~100 倍。
+function pickUsdFromObject(obj) {
+  if (!obj || typeof obj !== 'object') return null;
+  // 优先美元口径：price_dollar(实付) → goods_amount(标价) → income_dollar(净收入)
+  for (const candidate of [obj.price_dollar, obj.goods_amount, obj.income_dollar]) {
+    const numeric = toFiniteNumber(candidate);
+    if (numeric != null && numeric > 0) return numeric;
+  }
+  return null;
+}
+
 function extractRechargeAmount(row) {
+  // 1) properties['amount'] 若是嵌套 JSON，取里面的美元字段
+  const amountObj = parseJsonObject(row.amount);
+  if (amountObj) {
+    const usd = pickUsdFromObject(amountObj);
+    if (usd != null) return usd;
+    // 兜底：嵌套里没有美元字段，但有代币数 amount → 估算为美元(代币/100)
+    const tokenCents = toFiniteNumber(amountObj.amount);
+    if (tokenCents != null && tokenCents > 0) {
+      console.warn(`[amount] 订单 ${row.order_no ?? ''} 缺少美元字段，按 amount/100 估算: ${tokenCents} -> ${tokenCents / 100}`);
+      return tokenCents / 100;
+    }
+  }
+
+  // 2) 兼容旧的扁平字段(若 amount 本身就是标量数字)
   const directCandidates = [row.amount, row.money, row.price, row.pay_amount];
   for (const candidate of directCandidates) {
     const numeric = toFiniteNumber(candidate);
     if (numeric != null) return numeric;
   }
 
+  // 3) 兼容旧的 usd_amount 嵌套对象
   const usdAmount = parseJsonObject(row.usd_amount);
   if (usdAmount) {
-    for (const candidate of [usdAmount.amount, usdAmount.pay_amount, usdAmount.order_amount]) {
+    for (const candidate of [usdAmount.price_dollar, usdAmount.goods_amount, usdAmount.amount, usdAmount.pay_amount, usdAmount.order_amount]) {
       const numeric = toFiniteNumber(candidate);
       if (numeric != null) return numeric;
     }
