@@ -22,7 +22,8 @@ export async function querySelectDB<T = any>(sql: string, params: any[] = []): P
     // 会返回不一致的类型(有时是已解析对象/String 包装)，导致 JSON.parse 解析不到字段。
     typeCast: (field: any, next: any) => {
       if (field.type === 'JSON' || field.type === 'BLOB' || field.type === 'LONG_BLOB' || field.type === 'VAR_STRING' || field.type === 'STRING') {
-        return field.string();
+        const s = field.string();
+        return s == null ? null : String(s); // 强制原始字符串，避免 String 包装对象
       }
       return next();
     },

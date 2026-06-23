@@ -9,20 +9,28 @@ export type ParsedMsg = {
   sendTime: string | null;
 };
 
-// 安全解析可能是字符串或已被 mysql2 自动解析成对象的 JSON 列
-export function safeJson(v: string | object | null | undefined): any {
+// 安全解析。mysql2 在不同打包/结果集下可能返回：纯字符串、已解析对象、
+// 或 String 包装对象(typeof==='object' 但其实是字符串)。统一兜底处理。
+export function safeJson(v: any): any {
   if (v == null) return null;
-  if (typeof v === 'object') return v;
-  try { return JSON.parse(String(v)); } catch { return null; }
+  if (typeof v === 'string') {
+    try { return JSON.parse(v); } catch { return null; }
+  }
+  if (typeof v === 'object') {
+    // String 包装对象 / Buffer：先转成字符串再解析
+    if (v instanceof String || Buffer.isBuffer?.(v) || v?.constructor?.name === 'String') {
+      try { return JSON.parse(String(v)); } catch { return null; }
+    }
+    // 看起来已经是普通解析对象（有预期字段）就直接用，否则尝试 String 化解析
+    if ('account_id' in v || 'im_msg_info' in v || 'target_id' in v || 'nickname' in v) return v;
+    try { const s = String(v); if (s.startsWith('{')) return JSON.parse(s); } catch { /* ignore */ }
+    return v;
+  }
+  return null;
 }
 
-export function parseImMsg(props: string | object): ParsedMsg | null {
-  let p: any;
-  if (props && typeof props === 'object') {
-    p = props; // mysql2 对 JSON 列可能已自动解析成对象
-  } else {
-    try { p = JSON.parse(String(props)); } catch { return null; }
-  }
+export function parseImMsg(props: any): ParsedMsg | null {
+  const p: any = safeJson(props);
   if (!p || typeof p !== 'object') return null;
   const info = p.im_msg_info || {};
   const type = info.message_type;
