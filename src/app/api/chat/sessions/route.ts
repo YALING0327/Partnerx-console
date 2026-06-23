@@ -35,6 +35,11 @@ export async function POST(request: Request) {
       [days, inviterId, inviterId]
     );
 
+    {
+      const r0: any = rows[0] || {};
+      console.log('[chat/sessions] rows=', rows.length, 'rowKeys=', JSON.stringify(Object.keys(r0)), 'propsType=', typeof r0.props, 'propsIsBuf=', typeof Buffer !== 'undefined' && Buffer.isBuffer(r0.props), 'propsHead=', toBufferString(r0.props).slice(0, 50), 'parse=', JSON.stringify(parseImMsg(r0.props))?.slice(0, 80));
+    }
+
     type Sess = { peerId: string; nickname: string; country: string; gender: string; firstRecharge: string; lastTime: string; lastText: string; msgCount: number };
     const map = new Map<string, Sess>();
     for (const r of rows) {
