@@ -11,16 +11,15 @@ function required(name: string): string {
 }
 
 export async function querySelectDB<T = any>(sql: string, params: any[] = []): Promise<T[]> {
-  // 重要：用 typeCast:false。SelectDB 的 variant(BLOB) 列在 Next.js 打包后的运行时里，
-  // 若交给 mysql2 默认解码会返回 null；用 typeCast:false 则各环境一致地返回 Buffer，
-  // 由上层用 toBufferString() 统一转成字符串再 JSON.parse，最稳。
+  // 关键：SQL 里取 variant/JSON 列必须用 CONCAT('', CAST(... AS STRING)) 包一层，
+  // 让结果列的字段类型是 STRING(VARCHAR) 而非 BLOB —— 否则 mysql2 在 Next.js 打包后的
+  // 运行时会把 BLOB 列解码成 null/不可用对象，导致聊天解析全空。用默认 typeCast 即可。
   const connection = await mysql.createConnection({
     host: required('SELECTDB_HOST'),
     port: Number(process.env.SELECTDB_PORT || 9030),
     user: required('SELECTDB_USER'),
     password: required('SELECTDB_PASSWORD'),
     database: required('SELECTDB_DATABASE'),
-    typeCast: false,
     connectTimeout: 15000
   });
   try {

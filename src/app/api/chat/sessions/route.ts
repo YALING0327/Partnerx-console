@@ -24,9 +24,9 @@ export async function POST(request: Request) {
     // 取该师傅近 N 天双向消息（发出 or 收到），按时间倒序，限量保护
     const rows = await querySelectDB<any>(
       `SELECT account_id AS sender,
-              CAST(properties AS STRING) AS props,
-              CAST(user AS STRING) AS usr,
-              CAST(event_created_time AS STRING) AS t
+              CONCAT('', CAST(properties AS STRING)) AS props,
+              CONCAT('', CAST(user AS STRING)) AS usr,
+              CONCAT('', CAST(event_created_time AS STRING)) AS t
        FROM e_immsg
        WHERE event_created_time >= DATE_SUB(NOW(), INTERVAL ? DAY)
          AND (account_id = ? OR CAST(properties['target_id'] AS STRING) = ?)
@@ -34,11 +34,6 @@ export async function POST(request: Request) {
        LIMIT 20000`,
       [days, inviterId, inviterId]
     );
-
-    {
-      const r0: any = rows[0] || {};
-      console.log('[chat/sessions] rows=', rows.length, 'rowKeys=', JSON.stringify(Object.keys(r0)), 'propsType=', typeof r0.props, 'propsIsBuf=', typeof Buffer !== 'undefined' && Buffer.isBuffer(r0.props), 'propsHead=', toBufferString(r0.props).slice(0, 50), 'parse=', JSON.stringify(parseImMsg(r0.props))?.slice(0, 80));
-    }
 
     type Sess = { peerId: string; nickname: string; country: string; gender: string; firstRecharge: string; lastTime: string; lastText: string; msgCount: number };
     const map = new Map<string, Sess>();

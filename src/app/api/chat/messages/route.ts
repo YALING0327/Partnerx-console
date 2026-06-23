@@ -25,9 +25,9 @@ export async function POST(request: Request) {
     // 双向：师傅↔该用户。时间正序展示，限量保护。
     const rows = await querySelectDB<any>(
       `SELECT account_id AS sender,
-              CAST(properties AS STRING) AS props,
-              CAST(user AS STRING) AS usr,
-              CAST(event_created_time AS STRING) AS t
+              CONCAT('', CAST(properties AS STRING)) AS props,
+              CONCAT('', CAST(user AS STRING)) AS usr,
+              CONCAT('', CAST(event_created_time AS STRING)) AS t
        FROM e_immsg
        WHERE event_created_time >= DATE_SUB(NOW(), INTERVAL ? DAY)
          AND ((account_id = ? AND CAST(properties['target_id'] AS STRING) = ?)
