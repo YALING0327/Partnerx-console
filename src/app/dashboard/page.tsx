@@ -78,7 +78,7 @@ type DashboardData =
       users: DashboardUser[];
     };
 
-type View = 'home' | 'employees' | 'users';
+type View = 'home' | 'employees' | 'users' | 'chat';
 
 function fmt(value: number, lang: Lang) {
   const dollars = (Number(value || 0) || 0) / 100;
@@ -318,13 +318,15 @@ export default function DashboardPage() {
   const staffData = data?.role === 'staff' ? data : null;
 
   const navItems: { key: View; label: string }[] = isBoss
-    ? [{ key: 'home', label: t(lang, 'nav_home') }, { key: 'employees', label: t(lang, 'nav_employees') }, { key: 'users', label: t(lang, 'nav_users') }]
-    : [{ key: 'home', label: t(lang, 'nav_home') }, { key: 'employees', label: t(lang, 'nav_my_invite') }, { key: 'users', label: t(lang, 'nav_users') }];
+    ? [{ key: 'home', label: t(lang, 'nav_home') }, { key: 'employees', label: t(lang, 'nav_employees') }, { key: 'users', label: t(lang, 'nav_users') }, { key: 'chat', label: t(lang, 'nav_chat') }]
+    : [{ key: 'home', label: t(lang, 'nav_home') }, { key: 'employees', label: t(lang, 'nav_my_invite') }, { key: 'users', label: t(lang, 'nav_users') }, { key: 'chat', label: t(lang, 'nav_chat') }];
 
   const pageTitle = view === 'home'
     ? (isBoss ? t(lang, 'title_boss_home') : t(lang, 'title_staff_home'))
     : view === 'employees'
     ? (isBoss ? t(lang, 'title_employees') : t(lang, 'title_my_invite'))
+    : view === 'chat'
+    ? t(lang, 'title_chat')
     : t(lang, 'title_users');
 
   return (
@@ -371,7 +373,9 @@ export default function DashboardPage() {
           </div>
         </header>
 
-        {loading ? (
+        {view === 'chat' ? (
+          <ChatView user={user} lang={lang} />
+        ) : loading ? (
           <section className="loadingCard">{t(lang, 'loading')}</section>
         ) : error ? (
           <section className="loadingCard">{t(lang, 'load_failed')}：{error}</section>
@@ -706,5 +710,193 @@ export default function DashboardPage() {
         )}
       </section>
     </main>
+  );
+}
+
+// ===================== 聊天记录查看（只读） =====================
+
+type ChatEmployee = { employeeId: string; name: string; inviteCode: string; inviterId: string; status: string };
+type ChatSession = { peerId: string; nickname: string; country: string; gender: string; firstRecharge: string; lastTime: string; lastText: string; msgCount: number };
+type ChatMessage = { dir: 'out' | 'in'; text: string; kind: string; violation: string | 0; time: string };
+type ChatPeer = { peerId: string; nickname: string; country: string; gender: string; firstRecharge: string };
+
+function genderText(g: string, lang: Lang) {
+  if (g === '1') return lang === 'zh' ? '男' : 'M';
+  if (g === '2') return lang === 'zh' ? '女' : 'F';
+  return '-';
+}
+
+function ChatView({ user, lang }: { user: StoredUser; lang: Lang }) {
+  const auth = { userId: user.id, companyId: user.companyId, role: user.role, username: user.username };
+
+  const [employees, setEmployees] = useState<ChatEmployee[]>([]);
+  const [activeEmp, setActiveEmp] = useState<ChatEmployee | null>(null);
+  const [sessions, setSessions] = useState<ChatSession[]>([]);
+  const [activePeer, setActivePeer] = useState<ChatSession | null>(null);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [peerInfo, setPeerInfo] = useState<ChatPeer | null>(null);
+  const [days, setDays] = useState(30);
+
+  const [loadingEmp, setLoadingEmp] = useState(true);
+  const [loadingSess, setLoadingSess] = useState(false);
+  const [loadingMsg, setLoadingMsg] = useState(false);
+  const [err, setErr] = useState('');
+  const [search, setSearch] = useState('');
+
+  // 1) 加载可见师傅列表
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      setLoadingEmp(true); setErr('');
+      try {
+        const res = await fetch('/api/chat/employees', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(auth) });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error || '加载失败');
+        if (!alive) return;
+        setEmployees(json.employees || []);
+        if ((json.employees || []).length > 0) setActiveEmp(json.employees[0]);
+      } catch (e: any) { if (alive) setErr(e.message); }
+      finally { if (alive) setLoadingEmp(false); }
+    })();
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // 2) 选定师傅 → 加载对话用户列表
+  useEffect(() => {
+    if (!activeEmp) return;
+    let alive = true;
+    (async () => {
+      setLoadingSess(true); setErr(''); setSessions([]); setActivePeer(null); setMessages([]); setPeerInfo(null);
+      try {
+        const res = await fetch('/api/chat/sessions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...auth, inviterId: activeEmp.inviterId, days }) });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error || '加载失败');
+        if (!alive) return;
+        setSessions(json.sessions || []);
+      } catch (e: any) { if (alive) setErr(e.message); }
+      finally { if (alive) setLoadingSess(false); }
+    })();
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeEmp, days]);
+
+  // 3) 选定对话用户 → 加载完整对话
+  useEffect(() => {
+    if (!activeEmp || !activePeer) return;
+    let alive = true;
+    (async () => {
+      setLoadingMsg(true); setErr(''); setMessages([]);
+      try {
+        const res = await fetch('/api/chat/messages', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...auth, inviterId: activeEmp.inviterId, peerId: activePeer.peerId, days }) });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error || '加载失败');
+        if (!alive) return;
+        setMessages(json.messages || []);
+        setPeerInfo(json.peer || null);
+      } catch (e: any) { if (alive) setErr(e.message); }
+      finally { if (alive) setLoadingMsg(false); }
+    })();
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activePeer]);
+
+  const filteredSessions = sessions.filter((s) =>
+    !search.trim() || s.peerId.includes(search.trim()) || (s.nickname || '').toLowerCase().includes(search.trim().toLowerCase())
+  );
+  const peerNick = peerInfo?.nickname || activePeer?.nickname || '';
+
+  return (
+    <section className="chatWrap">
+      <div className="chatToolbar">
+        <span>{t(lang, 'chat_range')}：</span>
+        <select className="langSelect" value={days} onChange={(e) => setDays(Number(e.target.value))}>
+          <option value={7}>{t(lang, 'chat_7d')}</option>
+          <option value={30}>{t(lang, 'chat_30d')}</option>
+          <option value={90}>{t(lang, 'chat_90d')}</option>
+        </select>
+        {err && <span className="chatErr">{err}</span>}
+      </div>
+
+      <div className="chatLayout">
+        {/* 左：师傅(账号)列表 */}
+        <div className="chatCol chatEmps">
+          <div className="chatColHead">{t(lang, 'chat_employees')}</div>
+          <div className="chatColBody">
+            {loadingEmp ? <div className="chatHint">{t(lang, 'loading')}</div>
+              : employees.length === 0 ? <div className="chatHint">{t(lang, 'chat_no_emp')}</div>
+              : employees.map((e) => (
+                <button key={e.employeeId} className={`chatEmpItem${activeEmp?.employeeId === e.employeeId ? ' active' : ''}`} onClick={() => setActiveEmp(e)}>
+                  <strong>{e.name}</strong>
+                  <span>{e.inviteCode} · {e.inviterId}</span>
+                </button>
+              ))}
+          </div>
+        </div>
+
+        {/* 中：对话用户列表 */}
+        <div className="chatCol chatSessions">
+          <div className="chatColHead">
+            {t(lang, 'chat_sessions')}
+            <input className="chatSearch" placeholder={t(lang, 'chat_search')} value={search} onChange={(e) => setSearch(e.target.value)} />
+          </div>
+          <div className="chatColBody">
+            {loadingSess ? <div className="chatHint">{t(lang, 'loading')}</div>
+              : filteredSessions.length === 0 ? <div className="chatHint">{t(lang, 'chat_no_session')}</div>
+              : filteredSessions.map((s) => (
+                <button key={s.peerId} className={`chatSessItem${activePeer?.peerId === s.peerId ? ' active' : ''}`} onClick={() => setActivePeer(s)}>
+                  <div className="chatSessTop">
+                    <strong>{s.nickname || ('ID ' + s.peerId)}</strong>
+                    <span className="chatSessTime">{(s.lastTime || '').slice(5, 16)}</span>
+                  </div>
+                  <div className="chatSessSub">
+                    <span className="chatSessId">{s.peerId}</span>
+                    <span className="chatSessPreview">{s.lastText}</span>
+                  </div>
+                  <span className="chatSessCount">{s.msgCount}</span>
+                </button>
+              ))}
+          </div>
+        </div>
+
+        {/* 右：消息流 */}
+        <div className="chatCol chatMessages">
+          {!activePeer ? (
+            <div className="chatEmptyMsg">{t(lang, 'chat_pick_user')}</div>
+          ) : (
+            <>
+              <div className="chatMsgHead">
+                <div className="chatPeerAvatar">{(peerNick || activePeer.peerId).slice(0, 1).toUpperCase()}</div>
+                <div>
+                  <strong>{peerNick || ('ID ' + activePeer.peerId)}</strong>
+                  <div className="chatPeerMeta">
+                    {t(lang, 'chat_user_id')}: {activePeer.peerId}
+                    {(peerInfo?.country || activePeer.country) && <> · {peerInfo?.country || activePeer.country}</>}
+                    {' · '}{genderText(peerInfo?.gender || activePeer.gender, lang)}
+                    {(peerInfo?.firstRecharge || activePeer.firstRecharge) && <> · {t(lang, 'chat_first_recharge')} {(peerInfo?.firstRecharge || activePeer.firstRecharge)}</>}
+                  </div>
+                </div>
+              </div>
+              <div className="chatMsgBody">
+                {loadingMsg ? <div className="chatHint">{t(lang, 'loading')}</div>
+                  : messages.length === 0 ? <div className="chatHint">{t(lang, 'chat_no_msg')}</div>
+                  : messages.map((m, i) => (
+                    <div key={i} className={`chatRow ${m.dir}`}>
+                      <div className={`chatBubble ${m.dir} ${m.kind}`}>
+                        <div className="chatText">{m.text}</div>
+                        <div className="chatTime">
+                          {(m.time || '').slice(5, 19)}
+                          {m.violation ? <span className="chatViol"> · {t(lang, 'chat_violation')}</span> : null}
+                          {' · '}{m.dir === 'out' ? (activeEmp?.name || t(lang, 'chat_master')) : (peerNick || t(lang, 'chat_user'))}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </section>
   );
 }
