@@ -876,11 +876,19 @@ select {
 .chatRow { display: flex; }
 .chatRow.out { justify-content: flex-end; }
 .chatRow.in { justify-content: flex-start; }
-.chatBubble { max-width: 70%; padding: 8px 11px; border-radius: 12px; }
+.chatBubble { max-width: 70%; padding: 8px 11px; border-radius: 12px; color: #1d2129; }
 .chatBubble.out { background: #d2e3fc; border-bottom-right-radius: 3px; }
 .chatBubble.in { background: #fff; border: 1px solid #e8eaed; border-bottom-left-radius: 3px; }
 .chatBubble.gift { background: #fff3e0; }
-.chatBubble.image { background: #f1f3f4; font-style: italic; }
-.chatText { font-size: 13px; white-space: pre-wrap; word-break: break-word; }
-.chatTime { font-size: 10px; color: #9aa0a6; margin-top: 4px; }
+.chatBubble.image { background: #f1f3f4; }
+/* 强制气泡内文字深色，避免继承页面浅色字导致看不清 */
+.chatText { font-size: 13px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; color: #1d2129; }
+.chatImg { max-width: 220px; max-height: 260px; border-radius: 8px; display: block; cursor: pointer; }
+.chatTransBtn { font-size: 10px; color: #1a73e8; cursor: pointer; margin-top: 4px; user-select: none; display: inline-block; }
+.chatTransBtn:hover { text-decoration: underline; }
+.chatTrans { font-size: 12.5px; color: #2e7d32; margin-top: 4px; padding-top: 4px; border-top: 1px dashed #d4e3d4; }
+.chatTrans .tl { color: #9aa0a6; margin-right: 4px; }
+.chatTime { font-size: 10px; color: #6b7178; margin-top: 4px; }
 .chatViol { color: #d93025; font-weight: 600; }
+.chatTransToggle { display: flex; align-items: center; gap: 5px; font-size: 12px; color: #5f6368; white-space: nowrap; cursor: pointer; }
+.chatTransToggle input { cursor: pointer; }

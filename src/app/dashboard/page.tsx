@@ -717,7 +717,7 @@ export default function DashboardPage() {
 
 type ChatEmployee = { employeeId: string; name: string; inviteCode: string; inviterId: string; status: string };
 type ChatSession = { peerId: string; nickname: string; country: string; gender: string; firstRecharge: string; lastTime: string; lastText: string; msgCount: number };
-type ChatMessage = { dir: 'out' | 'in'; text: string; kind: string; violation: string | 0; time: string };
+type ChatMessage = { dir: 'out' | 'in'; text: string; kind: string; imageUrl?: string; violation: string | 0; time: string };
 type ChatPeer = { peerId: string; nickname: string; country: string; gender: string; firstRecharge: string };
 
 function genderText(g: string, lang: Lang) {
@@ -742,6 +742,36 @@ function ChatView({ user, lang }: { user: StoredUser; lang: Lang }) {
   const [loadingMsg, setLoadingMsg] = useState(false);
   const [err, setErr] = useState('');
   const [search, setSearch] = useState('');
+
+  // 翻译：autoTrans 开关 + 已翻译的译文(按消息索引缓存) + 翻译中状态
+  const [autoTrans, setAutoTrans] = useState(false);
+  const [trans, setTrans] = useState<Record<number, string>>({});
+  const [transLoading, setTransLoading] = useState(false);
+
+  // 翻译当前会话里需要翻译的消息（文本、非中文、未翻译过）
+  const translateMessages = useCallback(async (msgs: ChatMessage[]) => {
+    const idxs = msgs
+      .map((m, i) => ({ m, i }))
+      .filter(({ m }) => (m.kind === 'text' || m.kind === 'other') && m.text && !/^[一-龥\s\d\p{P}]+$/u.test(m.text));
+    if (idxs.length === 0) return;
+    setTransLoading(true);
+    try {
+      const res = await fetch('/api/chat/translate', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...auth, texts: idxs.map(({ m }) => m.text), target: 'zh-CN' })
+      });
+      const json = await res.json();
+      if (res.ok && Array.isArray(json.translations)) {
+        setTrans((prev) => {
+          const next = { ...prev };
+          idxs.forEach(({ i }, k) => { next[i] = json.translations[k]; });
+          return next;
+        });
+      }
+    } catch { /* 忽略翻译失败 */ }
+    finally { setTransLoading(false); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // 1) 加载可见师傅列表
   useEffect(() => {
@@ -786,20 +816,28 @@ function ChatView({ user, lang }: { user: StoredUser; lang: Lang }) {
     if (!activeEmp || !activePeer) return;
     let alive = true;
     (async () => {
-      setLoadingMsg(true); setErr(''); setMessages([]);
+      setLoadingMsg(true); setErr(''); setMessages([]); setTrans({});
       try {
         const res = await fetch('/api/chat/messages', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...auth, inviterId: activeEmp.inviterId, peerId: activePeer.peerId, days }) });
         const json = await res.json();
         if (!res.ok) throw new Error(json.error || '加载失败');
         if (!alive) return;
-        setMessages(json.messages || []);
+        const msgs = json.messages || [];
+        setMessages(msgs);
         setPeerInfo(json.peer || null);
+        if (autoTrans) translateMessages(msgs);
       } catch (e: any) { if (alive) setErr(e.message); }
       finally { if (alive) setLoadingMsg(false); }
     })();
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activePeer]);
+
+  // 打开自动翻译时，翻译当前已加载的消息
+  useEffect(() => {
+    if (autoTrans && messages.length > 0) translateMessages(messages);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoTrans]);
 
   const filteredSessions = sessions.filter((s) =>
     !search.trim() || s.peerId.includes(search.trim()) || (s.nickname || '').toLowerCase().includes(search.trim().toLowerCase())
@@ -867,7 +905,7 @@ function ChatView({ user, lang }: { user: StoredUser; lang: Lang }) {
             <>
               <div className="chatMsgHead">
                 <div className="chatPeerAvatar">{(peerNick || activePeer.peerId).slice(0, 1).toUpperCase()}</div>
-                <div>
+                <div style={{ flex: 1 }}>
                   <strong>{peerNick || ('ID ' + activePeer.peerId)}</strong>
                   <div className="chatPeerMeta">
                     {t(lang, 'chat_user_id')}: {activePeer.peerId}
@@ -876,6 +914,10 @@ function ChatView({ user, lang }: { user: StoredUser; lang: Lang }) {
                     {(peerInfo?.firstRecharge || activePeer.firstRecharge) && <> · {t(lang, 'chat_first_recharge')} {(peerInfo?.firstRecharge || activePeer.firstRecharge)}</>}
                   </div>
                 </div>
+                <label className="chatTransToggle">
+                  <input type="checkbox" checked={autoTrans} onChange={(e) => setAutoTrans(e.target.checked)} />
+                  {t(lang, 'chat_auto_translate')}{transLoading ? ' …' : ''}
+                </label>
               </div>
               <div className="chatMsgBody">
                 {loadingMsg ? <div className="chatHint">{t(lang, 'loading')}</div>
@@ -883,7 +925,16 @@ function ChatView({ user, lang }: { user: StoredUser; lang: Lang }) {
                   : messages.map((m, i) => (
                     <div key={i} className={`chatRow ${m.dir}`}>
                       <div className={`chatBubble ${m.dir} ${m.kind}`}>
-                        <div className="chatText">{m.text}</div>
+                        {m.imageUrl ? (
+                          <a href={m.imageUrl} target="_blank" rel="noreferrer">
+                            <img className="chatImg" src={m.imageUrl} alt="img" loading="lazy" />
+                          </a>
+                        ) : (
+                          <div className="chatText">{m.text}</div>
+                        )}
+                        {trans[i] && trans[i] !== m.text ? (
+                          <div className="chatTrans"><span className="tl">{t(lang, 'chat_translation')}</span>{trans[i]}</div>
+                        ) : null}
                         <div className="chatTime">
                           {(m.time || '').slice(5, 19)}
                           {m.violation ? <span className="chatViol"> · {t(lang, 'chat_violation')}</span> : null}

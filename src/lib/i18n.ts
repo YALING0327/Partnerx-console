@@ -61,6 +61,8 @@ const dictionary = {
     chat_violation: '违规',
     chat_master: '师傅',
     chat_user: '用户',
+    chat_auto_translate: '自动翻译',
+    chat_translation: '译文：',
 
     breadcrumb: '首页 / 伙伴增长控制台',
     role_boss: '企业管理员',
@@ -201,6 +203,8 @@ const dictionary = {
     chat_violation: 'flagged',
     chat_master: 'Staff',
     chat_user: 'User',
+    chat_auto_translate: 'Auto translate',
+    chat_translation: 'Translation: ',
     nav_employees: 'Employees',
     nav_my_invite: 'My Invite',
     nav_users: 'User Details',

@@ -43,7 +43,7 @@ export async function POST(request: Request) {
     );
 
     const peer = { peerId, nickname: '', country: '', gender: '' };
-    const messages: Array<{ dir: 'out' | 'in'; text: string; kind: string; violation: string | 0; time: string }> = [];
+    const messages: Array<{ dir: 'out' | 'in'; text: string; kind: string; imageUrl?: string; violation: string | 0; time: string }> = [];
     for (const r of rows) {
       const sender = String(r.sender ?? '');
       const target = String(r.target_id ?? '');
@@ -51,11 +51,12 @@ export async function POST(request: Request) {
       const isIn = sender === peerId && target === inviterId;
       if (!isOut && !isIn) continue; // 只保留这一对的消息
 
-      const kindText = renderMsg(r.content, r.mtype);
+      const rendered = renderMsg(r.content, r.mtype);
       messages.push({
         dir: isOut ? 'out' : 'in',
-        text: kindText.text,
-        kind: kindText.kind,
+        text: rendered.text,
+        kind: rendered.kind,
+        imageUrl: rendered.imageUrl,
         violation: String(r.violation ?? '') === '1' ? (r.violation_word || '违规') : 0,
         time: String(r.t ?? '')
       });
@@ -78,16 +79,22 @@ export async function POST(request: Request) {
   }
 }
 
-function renderMsg(content: any, mtype: any): { text: string; kind: string } {
+function renderMsg(content: any, mtype: any): { text: string; kind: string; imageUrl?: string } {
   const type = String(mtype ?? '');
+  const c = String(content ?? '');
+  // 礼物
   if (type === '6') {
     let t = '🎁 [礼物]';
-    try { const g = JSON.parse(String(content)); t = `🎁 ${g?.name ?? '礼物'} ×${g?.num ?? 1}`; } catch { /* keep */ }
+    try { const g = JSON.parse(c); t = `🎁 ${g?.name ?? '礼物'} ×${g?.num ?? 1}`; } catch { /* keep */ }
     return { text: t, kind: 'gift' };
   }
-  if (type === '1' || type === '2') return { text: '[图片]', kind: 'image' };
-  const c = String(content ?? '');
-  if (!c) return { text: type && type !== '0' ? `[消息类型 ${type}]` : '', kind: 'other' };
+  // 图片：content_value 是直链 URL（type 1/2）
+  if (type === '1' || type === '2') {
+    if (/^https?:\/\//i.test(c.trim())) return { text: '[图片]', kind: 'image', imageUrl: c.trim() };
+    return { text: '[图片]', kind: 'image' };
+  }
+  // type 0/12 等都是普通文本
+  if (!c) return { text: type && type !== '0' && type !== '12' ? `[消息类型 ${type}]` : '', kind: 'other' };
   if (/^\{.*\}$/.test(c.trim())) return { text: '[系统/互动消息]', kind: 'other' };
   return { text: c, kind: 'text' };
 }
