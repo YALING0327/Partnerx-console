@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { authenticate, assertInviterVisible, type ChatAuthBody } from '@/lib/chat-auth';
-import { querySelectDB } from '@/lib/selectdb';
+import { querySelectDB, toBufferString } from '@/lib/selectdb';
 import { parseImMsg, safeJson } from '@/lib/chat-parse';
 
 type Body = ChatAuthBody & { inviterId?: string; peerId?: string; days?: number };
@@ -43,7 +43,7 @@ export async function POST(request: Request) {
       const m = parseImMsg(r.props);
       if (!m) continue;
       const dir = m.sender === inviterId ? 'out' : 'in';
-      messages.push({ dir, text: m.text, kind: m.kind, violation: m.violation, time: r.t });
+      messages.push({ dir, text: m.text, kind: m.kind, violation: m.violation, time: toBufferString(r.t) });
       if (dir === 'in' && !peer.nickname) {
         const u = safeJson(r.usr);
         if (u) {

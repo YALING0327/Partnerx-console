@@ -13,15 +13,17 @@ export type ParsedMsg = {
 // 或 String 包装对象(typeof==='object' 但其实是字符串)。统一兜底处理。
 export function safeJson(v: any): any {
   if (v == null) return null;
-  // 已是带预期字段的普通对象，直接用
+  // 已是带预期字段的普通对象（非 Buffer/String 包装），直接用
   if (typeof v === 'object' && !(v instanceof String) && !(typeof Buffer !== 'undefined' && Buffer.isBuffer(v))) {
     if ('account_id' in v || 'im_msg_info' in v || 'target_id' in v || 'nickname' in v) return v;
   }
-  // 其余一律 String 化后尝试 JSON.parse（覆盖 string / Buffer / String 包装对象 / mysql2 包装类型）
+  // 其余统一转字符串再 JSON.parse（覆盖 string / Buffer / String 包装对象）
   let s: string;
-  try { s = typeof v === 'string' ? v : String(v); } catch { return null; }
+  if (typeof v === 'string') s = v;
+  else if (typeof Buffer !== 'undefined' && Buffer.isBuffer(v)) s = v.toString('utf8');
+  else { try { s = String(v); } catch { return null; } }
   s = s.trim();
-  if (!s || s[0] !== '{') return (typeof v === 'object' ? v : null);
+  if (!s || s[0] !== '{') return null;
   try { return JSON.parse(s); } catch { return null; }
 }
 

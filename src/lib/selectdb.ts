@@ -11,15 +11,16 @@ function required(name: string): string {
 }
 
 export async function querySelectDB<T = any>(sql: string, params: any[] = []): Promise<T[]> {
-  // 重要：不自定义 typeCast。所有查询的 variant/JSON 列都用 CAST(... AS STRING) 取出，
-  // mysql2 默认即返回纯字符串。一旦自定义 typeCast 调 field.string()，在 Next.js 打包后的
-  // 运行时会返回 String 包装对象(typeof==='object')，导致 JSON.parse 取不到字段、聊天解析为空。
+  // 重要：用 typeCast:false。SelectDB 的 variant(BLOB) 列在 Next.js 打包后的运行时里，
+  // 若交给 mysql2 默认解码会返回 null；用 typeCast:false 则各环境一致地返回 Buffer，
+  // 由上层用 toBufferString() 统一转成字符串再 JSON.parse，最稳。
   const connection = await mysql.createConnection({
     host: required('SELECTDB_HOST'),
     port: Number(process.env.SELECTDB_PORT || 9030),
     user: required('SELECTDB_USER'),
     password: required('SELECTDB_PASSWORD'),
     database: required('SELECTDB_DATABASE'),
+    typeCast: false,
     connectTimeout: 15000
   });
   try {
@@ -28,4 +29,12 @@ export async function querySelectDB<T = any>(sql: string, params: any[] = []): P
   } finally {
     await connection.end().catch(() => {});
   }
+}
+
+// 把 mysql2(typeCast:false) 返回的 Buffer/字符串统一转成字符串
+export function toBufferString(v: any): string {
+  if (v == null) return '';
+  if (typeof v === 'string') return v;
+  if (typeof Buffer !== 'undefined' && Buffer.isBuffer(v)) return v.toString('utf8');
+  return String(v);
 }

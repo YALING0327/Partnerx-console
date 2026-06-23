@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { authenticate, assertInviterVisible, type ChatAuthBody } from '@/lib/chat-auth';
-import { querySelectDB } from '@/lib/selectdb';
+import { querySelectDB, toBufferString } from '@/lib/selectdb';
 import { parseImMsg, safeJson } from '@/lib/chat-parse';
 
 type Body = ChatAuthBody & { inviterId?: string; days?: number };
@@ -35,11 +35,6 @@ export async function POST(request: Request) {
       [days, inviterId, inviterId]
     );
 
-    {
-      const pr: any = rows[0]?.props;
-      console.log('[chat/sessions] rows=', rows.length, 'propsType=', typeof pr, 'isBuf=', typeof Buffer !== 'undefined' && Buffer.isBuffer(pr), 'keys=', pr && typeof pr === 'object' ? JSON.stringify(Object.keys(pr).slice(0, 8)) : 'n/a', 'strHead=', String(pr).slice(0, 60));
-    }
-
     type Sess = { peerId: string; nickname: string; country: string; gender: string; firstRecharge: string; lastTime: string; lastText: string; msgCount: number };
     const map = new Map<string, Sess>();
     for (const r of rows) {
@@ -47,15 +42,16 @@ export async function POST(request: Request) {
       if (!m) continue;
       const peer = m.sender === inviterId ? m.target : m.sender;
       if (!peer || peer === inviterId) continue;
+      const t = toBufferString(r.t);
 
       let s = map.get(peer);
       if (!s) {
-        s = { peerId: peer, nickname: '', country: '', gender: '', firstRecharge: '', lastTime: r.t, lastText: m.text, msgCount: 0 };
+        s = { peerId: peer, nickname: '', country: '', gender: '', firstRecharge: '', lastTime: t, lastText: m.text, msgCount: 0 };
         map.set(peer, s);
       }
       s.msgCount += 1;
       // rows 已按时间倒序，首次遇到即最新一条
-      if (r.t > s.lastTime) { s.lastTime = r.t; s.lastText = m.text; }
+      if (t > s.lastTime) { s.lastTime = t; s.lastText = m.text; }
 
       // 对方资料：当这条由对方发出(sender=peer)，user 字段是对方
       if (m.sender === peer && !s.nickname) {
