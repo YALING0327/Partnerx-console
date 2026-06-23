@@ -97,15 +97,13 @@ function toFiniteNumber(value) {
   return Number.isFinite(numeric) ? numeric : null;
 }
 
-// 从 recharge.properties 里取「真实付费美元」。
-// 注意：源数据中 properties['amount'] 多为一整坨嵌套 JSON 字符串，例如
-//   {"amount":299,"goods_amount":"2.99","price_dollar":"2.99","income_dollar":"2.09",...}
-// 其中 amount(299) 是平台内部代币数(≈美元×100)，price_dollar/goods_amount 才是美元。
-// 历史 bug：旧逻辑直接把 amount 当数字 → 嵌套 JSON 解析失败落到 0(显示 $0.00)，
-//          或取到 299 → 比真实金额大 ~100 倍。
+// 从 recharge.properties 取「真实付费美元」。
+// 源表 properties 是 variant：properties['price_dollar'] / ['goods_amount'] 可直接当作独立 key 取出，
+// 值是美元字符串(如 "2.99")。而 properties['amount']=299 是平台内部代币数(≈美元×100)，不是美元。
+// 历史 bug：旧逻辑取 amount(代币数) 当金额 → 放大 ~100 倍；或解析失败落到 0(显示 $0.00)。
+// 正确口径：price_dollar(实付美元) → goods_amount(标价美元) → income_dollar(净收入美元)。
 function pickUsdFromObject(obj) {
   if (!obj || typeof obj !== 'object') return null;
-  // 优先美元口径：price_dollar(实付) → goods_amount(标价) → income_dollar(净收入)
   for (const candidate of [obj.price_dollar, obj.goods_amount, obj.income_dollar]) {
     const numeric = toFiniteNumber(candidate);
     if (numeric != null && numeric > 0) return numeric;
@@ -114,33 +112,35 @@ function pickUsdFromObject(obj) {
 }
 
 function extractRechargeAmount(row) {
-  // 1) properties['amount'] 若是嵌套 JSON，取里面的美元字段
+  // 1) 直接列：SQL 已把 price_dollar/goods_amount/income_dollar 选为独立列
+  for (const candidate of [row.price_dollar, row.goods_amount, row.income_dollar]) {
+    const numeric = toFiniteNumber(candidate);
+    if (numeric != null && numeric > 0) return numeric;
+  }
+
+  // 2) 若 amount 本身是嵌套 JSON 对象(部分取数路径会返回整坨)，从里面取美元字段
   const amountObj = parseJsonObject(row.amount);
   if (amountObj) {
     const usd = pickUsdFromObject(amountObj);
     if (usd != null) return usd;
-    // 兜底：嵌套里没有美元字段，但有代币数 amount → 估算为美元(代币/100)
-    const tokenCents = toFiniteNumber(amountObj.amount);
-    if (tokenCents != null && tokenCents > 0) {
-      console.warn(`[amount] 订单 ${row.order_no ?? ''} 缺少美元字段，按 amount/100 估算: ${tokenCents} -> ${tokenCents / 100}`);
-      return tokenCents / 100;
-    }
   }
 
-  // 2) 兼容旧的扁平字段(若 amount 本身就是标量数字)
-  const directCandidates = [row.amount, row.money, row.price, row.pay_amount];
-  for (const candidate of directCandidates) {
-    const numeric = toFiniteNumber(candidate);
-    if (numeric != null) return numeric;
-  }
-
-  // 3) 兼容旧的 usd_amount 嵌套对象
+  // 3) 旧的 usd_amount 嵌套对象兼容
   const usdAmount = parseJsonObject(row.usd_amount);
   if (usdAmount) {
-    for (const candidate of [usdAmount.price_dollar, usdAmount.goods_amount, usdAmount.amount, usdAmount.pay_amount, usdAmount.order_amount]) {
+    const usd = pickUsdFromObject(usdAmount);
+    if (usd != null) return usd;
+    for (const candidate of [usdAmount.amount, usdAmount.pay_amount, usdAmount.order_amount]) {
       const numeric = toFiniteNumber(candidate);
       if (numeric != null) return numeric;
     }
+  }
+
+  // 4) 最后兜底：只有代币数 amount → 估算美元(代币/100)，并告警
+  const tokenCents = toFiniteNumber(parseJsonObject(row.amount)?.amount ?? row.amount);
+  if (tokenCents != null && tokenCents > 0) {
+    console.warn(`[amount] 订单 ${row.order_no ?? ''} 无美元字段，按 amount/100 估算: ${tokenCents} -> ${tokenCents / 100}`);
+    return tokenCents / 100;
   }
 
   return 0;
@@ -273,6 +273,9 @@ async function main() {
         r.account_id AS platform_user_id,
         CAST(u.campaign AS STRING) AS campaign_key,
         CAST(u.sponsor AS STRING) AS sponsor_key,
+        CAST(r.properties['price_dollar'] AS STRING) AS price_dollar,
+        CAST(r.properties['goods_amount'] AS STRING) AS goods_amount,
+        CAST(r.properties['income_dollar'] AS STRING) AS income_dollar,
         r.properties['amount'] AS amount,
         r.properties['money'] AS money,
         r.properties['price'] AS price,
@@ -449,7 +452,7 @@ async function main() {
           const inviteFilterSql = ` AND ${inviteMatchSql}`;
           
           const sql = `
-            SELECT t.order_no, t.platform_user_id, t.campaign_key, t.sponsor_key, t.amount, t.money, t.price, t.pay_amount, t.usd_amount, t.pay_status, t.pay_time
+            SELECT t.order_no, t.platform_user_id, t.campaign_key, t.sponsor_key, t.price_dollar, t.goods_amount, t.income_dollar, t.amount, t.money, t.price, t.pay_amount, t.usd_amount, t.pay_status, t.pay_time
             FROM (${rechargeSql}) t
             WHERE 1=1
             ${inviteFilterSql}
