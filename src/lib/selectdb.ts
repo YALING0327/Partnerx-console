@@ -11,22 +11,15 @@ function required(name: string): string {
 }
 
 export async function querySelectDB<T = any>(sql: string, params: any[] = []): Promise<T[]> {
+  // 重要：不自定义 typeCast。所有查询的 variant/JSON 列都用 CAST(... AS STRING) 取出，
+  // mysql2 默认即返回纯字符串。一旦自定义 typeCast 调 field.string()，在 Next.js 打包后的
+  // 运行时会返回 String 包装对象(typeof==='object')，导致 JSON.parse 取不到字段、聊天解析为空。
   const connection = await mysql.createConnection({
     host: required('SELECTDB_HOST'),
     port: Number(process.env.SELECTDB_PORT || 9030),
     user: required('SELECTDB_USER'),
     password: required('SELECTDB_PASSWORD'),
     database: required('SELECTDB_DATABASE'),
-    // variant/JSON/BLOB 列统一转成字符串再交给上层 JSON.parse。
-    // 注意：必须用 field.string() 不带编码参数 —— 带 'utf8' 参数时 mysql2 在大结果集下
-    // 会返回不一致的类型(有时是已解析对象/String 包装)，导致 JSON.parse 解析不到字段。
-    typeCast: (field: any, next: any) => {
-      if (field.type === 'JSON' || field.type === 'BLOB' || field.type === 'LONG_BLOB' || field.type === 'VAR_STRING' || field.type === 'STRING') {
-        const s = field.string();
-        return s == null ? null : String(s); // 强制原始字符串，避免 String 包装对象
-      }
-      return next();
-    },
     connectTimeout: 15000
   });
   try {
