@@ -13,20 +13,16 @@ export type ParsedMsg = {
 // 或 String 包装对象(typeof==='object' 但其实是字符串)。统一兜底处理。
 export function safeJson(v: any): any {
   if (v == null) return null;
-  if (typeof v === 'string') {
-    try { return JSON.parse(v); } catch { return null; }
-  }
-  if (typeof v === 'object') {
-    // String 包装对象 / Buffer：先转成字符串再解析
-    if (v instanceof String || Buffer.isBuffer?.(v) || v?.constructor?.name === 'String') {
-      try { return JSON.parse(String(v)); } catch { return null; }
-    }
-    // 看起来已经是普通解析对象（有预期字段）就直接用，否则尝试 String 化解析
+  // 已是带预期字段的普通对象，直接用
+  if (typeof v === 'object' && !(v instanceof String) && !(typeof Buffer !== 'undefined' && Buffer.isBuffer(v))) {
     if ('account_id' in v || 'im_msg_info' in v || 'target_id' in v || 'nickname' in v) return v;
-    try { const s = String(v); if (s.startsWith('{')) return JSON.parse(s); } catch { /* ignore */ }
-    return v;
   }
-  return null;
+  // 其余一律 String 化后尝试 JSON.parse（覆盖 string / Buffer / String 包装对象 / mysql2 包装类型）
+  let s: string;
+  try { s = typeof v === 'string' ? v : String(v); } catch { return null; }
+  s = s.trim();
+  if (!s || s[0] !== '{') return (typeof v === 'object' ? v : null);
+  try { return JSON.parse(s); } catch { return null; }
 }
 
 export function parseImMsg(props: any): ParsedMsg | null {

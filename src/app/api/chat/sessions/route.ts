@@ -36,11 +36,8 @@ export async function POST(request: Request) {
     );
 
     {
-      const s = rows[0];
-      let manualParse = null;
-      try { manualParse = typeof s?.props === 'string' ? JSON.parse(s.props)?.account_id : 'NOT_STRING'; } catch (e: any) { manualParse = 'PARSE_ERR:' + e.message; }
-      const pm = parseImMsg(s?.props);
-      console.log('[chat/sessions] rows=', rows.length, 'propsType=', typeof s?.props, 'directAccId=', (s?.props as any)?.account_id, 'parseImMsg=', JSON.stringify(pm), 'inviterId=', inviterId);
+      const pr: any = rows[0]?.props;
+      console.log('[chat/sessions] rows=', rows.length, 'propsType=', typeof pr, 'isBuf=', typeof Buffer !== 'undefined' && Buffer.isBuffer(pr), 'keys=', pr && typeof pr === 'object' ? JSON.stringify(Object.keys(pr).slice(0, 8)) : 'n/a', 'strHead=', String(pr).slice(0, 60));
     }
 
     type Sess = { peerId: string; nickname: string; country: string; gender: string; firstRecharge: string; lastTime: string; lastText: string; msgCount: number };
