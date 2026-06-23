@@ -17,10 +17,12 @@ export async function querySelectDB<T = any>(sql: string, params: any[] = []): P
     user: required('SELECTDB_USER'),
     password: required('SELECTDB_PASSWORD'),
     database: required('SELECTDB_DATABASE'),
-    // variant/JSON 列统一按 utf8 字符串取出，避免 mysql2 把非 JSON 值误当 JSON 解析报错
+    // variant/JSON/BLOB 列统一转成字符串再交给上层 JSON.parse。
+    // 注意：必须用 field.string() 不带编码参数 —— 带 'utf8' 参数时 mysql2 在大结果集下
+    // 会返回不一致的类型(有时是已解析对象/String 包装)，导致 JSON.parse 解析不到字段。
     typeCast: (field: any, next: any) => {
-      if (field.type === 'JSON' || field.type === 'BLOB' || field.type === 'LONG_BLOB') {
-        return field.string('utf8');
+      if (field.type === 'JSON' || field.type === 'BLOB' || field.type === 'LONG_BLOB' || field.type === 'VAR_STRING' || field.type === 'STRING') {
+        return field.string();
       }
       return next();
     },
