@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start",
+    "start": "next start -p 3001",
     "sync:selectdb": "node scripts/sync-selectdb.mjs",
     "sync:selectdb:dry": "DRY_RUN=1 node scripts/sync-selectdb.mjs",
     "reconcile:attribution": "node scripts/reconcile-attribution.mjs",
