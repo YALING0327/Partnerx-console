@@ -6,7 +6,7 @@ import { authenticate, getVisibleEmployees, type ChatAuthBody } from '@/lib/chat
 export async function POST(request: Request) {
   try {
     const body = (await request.json()) as ChatAuthBody;
-    const auth = await authenticate(body);
+    const auth = await authenticate(body, { requireBoss: true });
     if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
     const emps = await getVisibleEmployees(auth.companyId, auth.role, body.userId!);

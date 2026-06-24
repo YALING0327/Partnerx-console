@@ -26,7 +26,7 @@ async function translateOne(text: string, target: string): Promise<string> {
 export async function POST(request: Request) {
   try {
     const body = (await request.json()) as Body;
-    const auth = await authenticate(body);
+    const auth = await authenticate(body, { requireBoss: true });
     if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
     const texts = Array.isArray(body.texts) ? body.texts.slice(0, 200) : [];

@@ -20,7 +20,8 @@ type AuthOk = { ok: true; companyId: string; role: 'boss' | 'staff'; account: an
 type AuthErr = { ok: false; status: number; error: string };
 
 // 复用 overview/route.ts 的鉴权范式：用 company_accounts 复验登录态。
-export async function authenticate(body: ChatAuthBody): Promise<AuthOk | AuthErr> {
+// opts.requireBoss=true 时仅允许老板(聊天记录功能只对老板开放)。
+export async function authenticate(body: ChatAuthBody, opts: { requireBoss?: boolean } = {}): Promise<AuthOk | AuthErr> {
   const { userId, companyId, role, username } = body;
   if (!userId || !companyId || !role || !username) {
     return { ok: false, status: 400, error: '缺少必要参数' };
@@ -35,6 +36,7 @@ export async function authenticate(body: ChatAuthBody): Promise<AuthOk | AuthErr
   if (error || !account) return { ok: false, status: 401, error: '登录信息无效，请重新登录' };
   if (account.status !== 'active') return { ok: false, status: 403, error: '账号已停用' };
   if (account.role !== role) return { ok: false, status: 403, error: '角色信息不匹配' };
+  if (opts.requireBoss && account.role !== 'boss') return { ok: false, status: 403, error: '无权访问' };
   return { ok: true, companyId, role, account };
 }
 

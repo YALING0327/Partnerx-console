@@ -330,9 +330,10 @@ export default function DashboardPage() {
   const bossData = data?.role === 'boss' ? data : null;
   const staffData = data?.role === 'staff' ? data : null;
 
+  // 聊天记录仅对老板开放，员工不可见
   const navItems: { key: View; label: string }[] = isBoss
     ? [{ key: 'home', label: t(lang, 'nav_home') }, { key: 'employees', label: t(lang, 'nav_employees') }, { key: 'users', label: t(lang, 'nav_users') }, { key: 'chat', label: t(lang, 'nav_chat') }]
-    : [{ key: 'home', label: t(lang, 'nav_home') }, { key: 'employees', label: t(lang, 'nav_my_invite') }, { key: 'users', label: t(lang, 'nav_users') }, { key: 'chat', label: t(lang, 'nav_chat') }];
+    : [{ key: 'home', label: t(lang, 'nav_home') }, { key: 'employees', label: t(lang, 'nav_my_invite') }, { key: 'users', label: t(lang, 'nav_users') }];
 
   const pageTitle = view === 'home'
     ? (isBoss ? t(lang, 'title_boss_home') : t(lang, 'title_staff_home'))

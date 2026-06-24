@@ -11,7 +11,7 @@ const U = `CONCAT('', CAST(\`user\` AS STRING))`;
 export async function POST(request: Request) {
   try {
     const body = (await request.json()) as Body;
-    const auth = await authenticate(body);
+    const auth = await authenticate(body, { requireBoss: true });
     if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
     const inviterId = String(body.inviterId ?? '').trim();
