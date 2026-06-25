@@ -75,16 +75,6 @@ function normalizeInviteCode(value) {
   return normalizeText(value).toLowerCase();
 }
 
-// 按 app_name(包名) 后缀判定用户来源平台：android / ios / unknown。
-// 安卓包：含 .android / .gp / dico；苹果包：含 .ios / mitu。channel 作兜底(dcg=安卓, mitu=苹果)。
-function detectPlatform(appName, channel) {
-  const a = normalizeText(appName).toLowerCase();
-  const c = normalizeText(channel).toLowerCase();
-  if (/\.ios\b|ios$|mitu/.test(a) || /ios|mitu/.test(c)) return 'ios';
-  if (/\.android\b|android$|\.gp\b|dico|dcg/.test(a) || /android|\bgp\b|dcg/.test(c)) return 'android';
-  return 'unknown';
-}
-
 function parseJsonObject(value) {
   if (!value) return null;
   if (typeof value === 'object') return value;
@@ -107,49 +97,19 @@ function toFiniteNumber(value) {
   return Number.isFinite(numeric) ? numeric : null;
 }
 
-// 返回充值金额，单位「美元分」(前端 fmt() 会 ÷100 显示，历史数据存的也是分)。
-// 源表 properties 是 variant：内层 amount 即「美元分」(== price_dollar × 100，已验证 3000/3000 相等)，
-//   如 amount=299 ⇔ price_dollar="2.99"。price_dollar/goods_amount/income_dollar 是「美元」字符串。
-// 历史 bug：① 解析失败把 amount 当 0 → 显示 $0.00；② 上一轮误改成存美元(2.99) → 前端÷100 显示 $0.03。
-// 口径：优先用内层 amount(分)；缺失时用 price_dollar→goods_amount→income_dollar(美元)×100 折算为分。
-function usdToCents(usd) {
-  return Math.round(usd * 100);
-}
-function pickUsdCentsFromObject(obj) {
-  if (!obj || typeof obj !== 'object') return null;
-  // 内层 amount 本身就是分，直接用
-  const inner = toFiniteNumber(obj.amount);
-  if (inner != null && inner > 0) return inner;
-  for (const candidate of [obj.price_dollar, obj.goods_amount, obj.income_dollar]) {
-    const numeric = toFiniteNumber(candidate);
-    if (numeric != null && numeric > 0) return usdToCents(numeric);
-  }
-  return null;
-}
-
 function extractRechargeAmount(row) {
-  // 1) amount 若是嵌套 JSON(派生表上下文常见)：内层 amount(分) 优先，否则 price_dollar×100
-  const amountObj = parseJsonObject(row.amount);
-  if (amountObj) {
-    const cents = pickUsdCentsFromObject(amountObj);
-    if (cents != null) return cents;
-  }
-
-  // 2) amount 若是标量数字：它本身就是「美元分」
-  const scalarCents = toFiniteNumber(row.amount);
-  if (scalarCents != null && scalarCents > 0) return scalarCents;
-
-  // 3) 直接列 price_dollar/goods_amount/income_dollar(美元) × 100
-  for (const candidate of [row.price_dollar, row.goods_amount, row.income_dollar]) {
+  const directCandidates = [row.amount, row.money, row.price, row.pay_amount];
+  for (const candidate of directCandidates) {
     const numeric = toFiniteNumber(candidate);
-    if (numeric != null && numeric > 0) return usdToCents(numeric);
+    if (numeric != null) return numeric;
   }
 
-  // 4) 旧的 usd_amount 嵌套对象兼容
   const usdAmount = parseJsonObject(row.usd_amount);
   if (usdAmount) {
-    const cents = pickUsdCentsFromObject(usdAmount);
-    if (cents != null) return cents;
+    for (const candidate of [usdAmount.amount, usdAmount.pay_amount, usdAmount.order_amount]) {
+      const numeric = toFiniteNumber(candidate);
+      if (numeric != null) return numeric;
+    }
   }
 
   return 0;
@@ -269,8 +229,6 @@ async function main() {
         CAST(properties['campaign'] AS STRING) AS campaign_key,
         CAST(properties['sponsor'] AS STRING) AS sponsor_key,
         account_id AS platform_user_id,
-        json_extract_string(CONCAT('', CAST(properties AS STRING)), '$.app_name') AS app_name,
-        json_extract_string(CONCAT('', CAST(properties AS STRING)), '$.channel') AS channel,
         COALESCE(CAST(properties['register_time'] AS STRING), CAST(event_created_time AS STRING)) AS bind_time
       FROM \`user\`
       WHERE (properties['campaign'] IS NOT NULL AND properties['campaign'] != '')
@@ -284,16 +242,13 @@ async function main() {
         r.account_id AS platform_user_id,
         CAST(u.campaign AS STRING) AS campaign_key,
         CAST(u.sponsor AS STRING) AS sponsor_key,
-        CAST(r.properties['price_dollar'] AS STRING) AS price_dollar,
-        CAST(r.properties['goods_amount'] AS STRING) AS goods_amount,
-        CAST(r.properties['income_dollar'] AS STRING) AS income_dollar,
         r.properties['amount'] AS amount,
         r.properties['money'] AS money,
         r.properties['price'] AS price,
         r.properties['pay_amount'] AS pay_amount,
         r.properties['usd_amount'] AS usd_amount,
         CAST(r.properties['pay_status'] AS STRING) AS pay_status,
-        r.event_created_time AS pay_time
+        r.event_created_time AS pay_created_time
       FROM recharge r
       JOIN (
         SELECT
@@ -379,7 +334,7 @@ async function main() {
           // 注意：去掉了 t.bind_time > ? 的过滤，因为对于 IN 查询，业务库全表扫描过滤更慢。
           // 我们直接依赖 IN (邀请码) 走二级索引（如果存在），或者直接全量返回这些邀请码的数据
           const sql = `
-            SELECT t.campaign_key, t.sponsor_key, t.platform_user_id, t.app_name, t.channel, t.bind_time
+            SELECT t.campaign_key, t.sponsor_key, t.platform_user_id, t.bind_time
             FROM (${attributionSql}) t
             WHERE 1=1
             ${inviteFilterSql}
@@ -410,8 +365,7 @@ async function main() {
               platform_user_id: platformUserId,
               invite_code: resolved.employee.invite_code,
               bind_time: toIso(row.bind_time),
-              bind_status: resolved.source,
-              app_platform: detectPlatform(row.app_name, row.channel)
+              bind_status: resolved.source
             };
             attributionByUser.set(
               platformUserId,
@@ -464,11 +418,11 @@ async function main() {
           const inviteFilterSql = ` AND ${inviteMatchSql}`;
           
           const sql = `
-            SELECT t.order_no, t.platform_user_id, t.campaign_key, t.sponsor_key, t.price_dollar, t.goods_amount, t.income_dollar, t.amount, t.money, t.price, t.pay_amount, t.usd_amount, t.pay_status, t.pay_time
+            SELECT t.order_no, t.platform_user_id, t.campaign_key, t.sponsor_key, t.amount, t.money, t.price, t.pay_amount, t.usd_amount, t.pay_status, t.pay_created_time
             FROM (${rechargeSql}) t
             WHERE 1=1
             ${inviteFilterSql}
-            ORDER BY t.pay_time ASC, t.order_no ASC
+            ORDER BY t.pay_created_time ASC, t.order_no ASC
             LIMIT ${batchSize} OFFSET ${read}
           `;
           const [rowsRaw] = await connection.query(sql);
@@ -511,7 +465,7 @@ async function main() {
               order_no: orderNo,
               amount: extractRechargeAmount(row) / amountDivisor,
               status: extractRechargeStatus(row),
-              pay_time: toIso(row.pay_time),
+              pay_time: toIso(row.pay_created_time),
               is_first_recharge: false
             });
           }
@@ -524,7 +478,7 @@ async function main() {
           }
 
           const last = rows[rows.length - 1];
-          keyset.pay_time = toKeysetTime(last.pay_time);
+          keyset.pay_created_time = toKeysetTime(last.pay_created_time);
           keyset.order_no = normalizeText(last.order_no) || keyset.order_no;
 
           if (!dryRun && !isCatchUp) {
@@ -541,7 +495,7 @@ async function main() {
       if (newKeys.length > 0 && !resetCursor) {
         const catchUpAttribution = await syncAttributionLoop(newKeys, { bind_time: '1970-01-01 00:00:00', platform_user_id: '' }, true);
         for (const [k, v] of catchUpAttribution.cache) globalAttributionCache.set(k, v);
-        const catchUpRecharge = await syncRechargeLoop(newKeys, { pay_time: '1970-01-01 00:00:00', order_no: '' }, globalAttributionCache, true);
+        const catchUpRecharge = await syncRechargeLoop(newKeys, { pay_created_time: '1970-01-01 00:00:00', order_no: '' }, globalAttributionCache, true);
         console.log(`历史追溯完成：追溯归因 ${catchUpAttribution.hit} 条，追溯充值 ${catchUpRecharge.hit} 条`);
       }
 
@@ -553,7 +507,7 @@ async function main() {
       for (const [k, v] of incrementalAttribution.cache) globalAttributionCache.set(k, v);
       console.log(`增量归因读取完成：读取 ${incrementalAttribution.read} 条，命中 ${incrementalAttribution.hit} 条`);
 
-      const rechargeKeyset = cursor.recharge ?? { pay_time: process.env.SELECTDB_RECHARGE_START_TIME || '1970-01-01 00:00:00', order_no: '' };
+      const rechargeKeyset = cursor.recharge ?? { pay_created_time: process.env.SELECTDB_RECHARGE_START_TIME || '1970-01-01 00:00:00', order_no: '' };
       const incrementalRecharge = await syncRechargeLoop(inviteFilterKeys, rechargeKeyset, globalAttributionCache, false);
       console.log(`增量充值读取完成：读取 ${incrementalRecharge.read} 条，命中 ${incrementalRecharge.hit} 条`);
 
