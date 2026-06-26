@@ -3,6 +3,32 @@ import { supabaseServer, fetchAll } from '@/lib/supabase-server';
 
 type LoginRole = 'boss' | 'staff';
 
+// 进程级 LRU 缓存（dashboard 概览）：30s TTL 抑制前端轮询/重复刷新对
+// Supabase/PostgREST 的压力，避免「一秒多次查询」。不同 role/参数组合用不同 key。
+const OVERVIEW_CACHE_TTL_MS = 30_000;
+const OVERVIEW_CACHE_MAX = 50;
+type CacheEntry = { value: any; expires: number };
+const overviewCache = new Map<string, CacheEntry>();
+function cacheGet(key: string): any | null {
+  const entry = overviewCache.get(key);
+  if (!entry) return null;
+  if (entry.expires < Date.now()) {
+    overviewCache.delete(key);
+    return null;
+  }
+  // LRU touch
+  overviewCache.delete(key);
+  overviewCache.set(key, entry);
+  return entry.value;
+}
+function cacheSet(key: string, value: any) {
+  if (overviewCache.size >= OVERVIEW_CACHE_MAX) {
+    const firstKey = overviewCache.keys().next().value;
+    if (firstKey) overviewCache.delete(firstKey);
+  }
+  overviewCache.set(key, { value, expires: Date.now() + OVERVIEW_CACHE_TTL_MS });
+}
+
 type DashboardRequest = {
   userId?: string;
   companyId?: string;
@@ -237,10 +263,16 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: '角色信息不匹配' }, { status: 403 });
     }
 
+    const cacheKey = `${role}:${companyId}:${userId}:${startDate || ''}:${endDate || ''}:${metricStartDate || ''}:${metricEndDate || ''}`;
+    const cached = cacheGet(cacheKey);
+    if (cached) {
+      return NextResponse.json(cached);
+    }
+
     if (role === 'boss') {
       let summaryRechargeQuery = supabaseServer
         .from('recharge_orders')
-        .select('employee_id, platform_user_id, amount, pay_time, status')
+        .select('employee_id, platform_user_id, amount, status')
         .eq('company_id', companyId);
 
       let summaryAttributionQuery = supabaseServer
@@ -366,13 +398,15 @@ export async function POST(request: Request) {
         );
       });
 
-      return NextResponse.json({
+      const payload = {
         role,
         currentUser: { name: account.name, username: account.username },
         summary: { ...summary, employeeCount: employees.length },
         employees: employeeRows,
         users
-      });
+      };
+      cacheSet(cacheKey, payload);
+      return NextResponse.json(payload);
     }
 
     // staff
@@ -394,7 +428,7 @@ export async function POST(request: Request) {
 
     let summaryRechargeQuery = supabaseServer
       .from('recharge_orders')
-      .select('employee_id, platform_user_id, amount, pay_time, status')
+      .select('employee_id, platform_user_id, amount, status')
       .eq('company_id', companyId)
       .eq('employee_id', employee.id);
 
@@ -518,14 +552,16 @@ export async function POST(request: Request) {
       }))
       .sort((a, b) => b.totalAmount - a.totalAmount); // 按充值金额降序
 
-    return NextResponse.json({
+    const payload = {
       role,
       currentUser: { name: account.name, username: account.username },
       summary,
       profile: { name: employee.employee_name, inviteCode: employee.invite_code, inviterId: employee.inviter_id ?? null, status: employee.status },
       todayTeamStats,
       users
-    });
+    };
+    cacheSet(cacheKey, payload);
+    return NextResponse.json(payload);
   } catch (error) {
     console.error('读取控制台概览失败', error);
     return NextResponse.json({ error: '服务器出了点问题，请稍后重试' }, { status: 500 });
