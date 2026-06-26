@@ -251,6 +251,9 @@ export async function POST(request: Request) {
       summaryAttributionQuery = applyBeijingBindDateRange(summaryAttributionQuery, metricStartDate, metricEndDate);
       summaryRechargeQuery = applyBeijingPayDateRange(summaryRechargeQuery, metricStartDate, metricEndDate);
 
+      // ⚠️ 重要约束：用户的「充值金额 / 充值笔数」必须查全量（LTV 语义），
+      // 绝对不能给 userRechargeQuery 加 pay_time 过滤，否则会把历史充值切掉。
+      // 只有 userAttributionQuery 受 startDate/endDate 影响（用于按归因期筛用户）。
       let userRechargeQuery = supabaseServer
         .from('recharge_orders')
         .select('employee_id, platform_user_id, amount, pay_time, status')
@@ -262,6 +265,7 @@ export async function POST(request: Request) {
         .eq('company_id', companyId);
 
       userAttributionQuery = applyBeijingBindDateRange(userAttributionQuery, startDate, endDate);
+      // 注意：userRechargeQuery 故意不调 applyBeijingPayDateRange，保持全量。
 
       const [employeesResult, summaryAttributions, summaryRecharges, userAttributions, userRecharges] = await Promise.all([
         supabaseServer
@@ -400,13 +404,13 @@ export async function POST(request: Request) {
     summaryAttributionQuery = applyBeijingBindDateRange(summaryAttributionQuery, metricStartDate, metricEndDate);
     summaryRechargeQuery = applyBeijingPayDateRange(summaryRechargeQuery, metricStartDate, metricEndDate);
 
+        // ⚠️ 重要约束：员工端的「充值金额 / 充值笔数」也必须查全量（LTV 语义），
+    // 绝对不能给 rechargeQuery 加 pay_time 过滤，否则会把历史充值切掉。
     let rechargeQuery = supabaseServer
       .from('recharge_orders')
       .select('employee_id, platform_user_id, amount, pay_time, status')
       .eq('company_id', companyId)
       .eq('employee_id', employee.id);
-
-    // Remove pay_time filter to get full LTV
 
     let attributionQuery = supabaseServer
       .from('attribution_users')
