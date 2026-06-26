@@ -249,7 +249,10 @@ export async function POST(request: Request) {
         .eq('company_id', companyId);
 
       summaryAttributionQuery = applyBeijingBindDateRange(summaryAttributionQuery, metricStartDate, metricEndDate);
-      summaryRechargeQuery = applyBeijingPayDateRange(summaryRechargeQuery, metricStartDate, metricEndDate);
+      // ⚠️ 重要约束：员工的「充值金额 / 充值笔数」必须查全量（LTV 语义），
+      // 绝对不能给 summaryRechargeQuery 加 pay_time 过滤，否则会把历史充值切掉、
+      // distinct user 算少。只有 summaryAttributionQuery 受 metricStartDate/metricEndDate
+      // 影响（用于按归因期筛「新增徒弟」），summaryRechargeQuery 保持全量。
 
       // ⚠️ 重要约束：用户的「充值金额 / 充值笔数」必须查全量（LTV 语义），
       // 绝对不能给 userRechargeQuery 加 pay_time 过滤，否则会把历史充值切掉。
@@ -402,9 +405,11 @@ export async function POST(request: Request) {
       .eq('employee_id', employee.id);
 
     summaryAttributionQuery = applyBeijingBindDateRange(summaryAttributionQuery, metricStartDate, metricEndDate);
-    summaryRechargeQuery = applyBeijingPayDateRange(summaryRechargeQuery, metricStartDate, metricEndDate);
+    // ⚠️ 重要约束：员工端的「充值金额 / 充值笔数」也必须查全量（LTV 语义），
+    // 绝对不能给 summaryRechargeQuery 加 pay_time 过滤，否则会把历史充值切掉、
+    // distinct user 算少。
 
-        // ⚠️ 重要约束：员工端的「充值金额 / 充值笔数」也必须查全量（LTV 语义），
+    // ⚠️ 重要约束：员工端的「充值金额 / 充值笔数」也必须查全量（LTV 语义），
     // 绝对不能给 rechargeQuery 加 pay_time 过滤，否则会把历史充值切掉。
     let rechargeQuery = supabaseServer
       .from('recharge_orders')
