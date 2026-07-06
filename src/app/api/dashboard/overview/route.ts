@@ -1,33 +1,11 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import { NextResponse } from 'next/server';
 import { supabaseServer, fetchAll } from '@/lib/supabase-server';
+import { querySelectDB } from '@/lib/selectdb';
+import { getOverviewCache, setOverviewCache } from '@/lib/dashboard-overview-cache';
 
 type LoginRole = 'boss' | 'staff';
-
-// 进程级 LRU 缓存（dashboard 概览）：30s TTL 抑制前端轮询/重复刷新对
-// Supabase/PostgREST 的压力，避免「一秒多次查询」。不同 role/参数组合用不同 key。
-const OVERVIEW_CACHE_TTL_MS = 30_000;
-const OVERVIEW_CACHE_MAX = 50;
-type CacheEntry = { value: any; expires: number };
-const overviewCache = new Map<string, CacheEntry>();
-function cacheGet(key: string): any | null {
-  const entry = overviewCache.get(key);
-  if (!entry) return null;
-  if (entry.expires < Date.now()) {
-    overviewCache.delete(key);
-    return null;
-  }
-  // LRU touch
-  overviewCache.delete(key);
-  overviewCache.set(key, entry);
-  return entry.value;
-}
-function cacheSet(key: string, value: any) {
-  if (overviewCache.size >= OVERVIEW_CACHE_MAX) {
-    const firstKey = overviewCache.keys().next().value;
-    if (firstKey) overviewCache.delete(firstKey);
-  }
-  overviewCache.set(key, { value, expires: Date.now() + OVERVIEW_CACHE_TTL_MS });
-}
 
 type DashboardRequest = {
   userId?: string;
@@ -38,6 +16,13 @@ type DashboardRequest = {
   endDate?: string;
   metricStartDate?: string;
   metricEndDate?: string;
+  forceRefresh?: boolean;
+  page?: number;
+  pageSize?: number;
+  filterEmployee?: string;
+  userIdKeyword?: string;
+  // CSV 导出用：返回筛选后的全部用户（不分页）
+  includeAllUsers?: boolean;
 };
 
 type EmployeeRow = {
@@ -55,7 +40,6 @@ type AttributionRow = {
   platform_user_id: string;
   invite_code: string;
   bind_time: string;
-  bind_status?: string | null;
   app_platform?: string | null;
 };
 
@@ -67,7 +51,55 @@ type RechargeRow = {
   status: string;
 };
 
-type AttributionSource = 'invite' | 'adjust';
+type SelectDbIncomeRow = {
+  platform_user_id: string;
+  pay_time: string;
+  income_dollar: number | string | null;
+};
+
+type PlatformType = 'android' | 'ios' | 'unknown';
+
+// 该公司员工端的充值口径特殊（按 SelectDB income_dollar 实时计算），可用环境变量覆盖。
+const LEADPULSE_COMPANY_ID = process.env.LEADPULSE_COMPANY_ID || 'd542e5ce-ed3c-4416-bd43-282152d2ef09';
+const SYNC_CURSOR_FILE = path.resolve(process.cwd(), '.selectdb-sync-cursor.json');
+
+type SyncCursorFile = {
+  attribution?: {
+    bind_time?: string;
+  } | null;
+  recharge?: {
+    pay_time?: string;
+    pay_created_time?: string;
+  } | null;
+};
+
+function normalizeCursorTimeValue(value?: string | null) {
+  const raw = String(value ?? '').trim();
+  if (!raw) return '';
+  return raw
+    .replace('T', ' ')
+    .replace(/\.\d+/, '')
+    .replace(/Z$/, '')
+    .replace(/[+-]\d{2}:\d{2}$/, '')
+    .trim();
+}
+
+function readLastSyncTime() {
+  try {
+    if (!fs.existsSync(SYNC_CURSOR_FILE)) return null;
+    const cursor = JSON.parse(fs.readFileSync(SYNC_CURSOR_FILE, 'utf8')) as SyncCursorFile;
+    const values = [
+      normalizeCursorTimeValue(cursor.attribution?.bind_time),
+      normalizeCursorTimeValue(cursor.recharge?.pay_time),
+      normalizeCursorTimeValue(cursor.recharge?.pay_created_time)
+    ].filter(Boolean);
+    if (values.length === 0) return null;
+    values.sort((a, b) => a.localeCompare(b));
+    return values[values.length - 1] ?? null;
+  } catch {
+    return null;
+  }
+}
 
 function normalizeYmd(value?: string) {
   const raw = String(value ?? '').trim();
@@ -85,61 +117,37 @@ function addDaysYmd(ymd: string, days: number) {
   return `${nextYear}-${nextMonth}-${nextDay}`;
 }
 
-function getTodayBeijing() {
-  const now = new Date();
-  const beijingTime = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Shanghai' }));
-  const year = beijingTime.getFullYear();
-  const month = String(beijingTime.getMonth() + 1).padStart(2, '0');
-  const day = String(beijingTime.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
-
 function toBeijingUtcStart(ymd: string) {
   return new Date(`${normalizeYmd(ymd)}T00:00:00+08:00`).toISOString();
 }
 
-function applyBeijingBindDateRange<T extends { gte: Function; lt: Function }>(
-  query: T,
-  startDate?: string,
-  endDate?: string
-) {
+function applyBeijingBindDateRange<T extends { gte: Function; lt: Function }>(query: T, startDate?: string, endDate?: string) {
   let nextQuery = query;
   const normalizedStart = normalizeYmd(startDate);
   const normalizedEnd = normalizeYmd(endDate);
-
-  if (normalizedStart) {
-    nextQuery = nextQuery.gte('bind_time', toBeijingUtcStart(normalizedStart));
-  }
-  if (normalizedEnd) {
-    nextQuery = nextQuery.lt('bind_time', toBeijingUtcStart(addDaysYmd(normalizedEnd, 1)));
-  }
-
+  if (normalizedStart) nextQuery = nextQuery.gte('bind_time', toBeijingUtcStart(normalizedStart));
+  if (normalizedEnd) nextQuery = nextQuery.lt('bind_time', toBeijingUtcStart(addDaysYmd(normalizedEnd, 1)));
   return nextQuery;
 }
 
-function applyBeijingPayDateRange<T extends { gte: Function; lt: Function }>(
-  query: T,
-  startDate?: string,
-  endDate?: string
-) {
+function applyBeijingPayDateRange<T extends { gte: Function; lt: Function }>(query: T, startDate?: string, endDate?: string) {
   let nextQuery = query;
   const normalizedStart = normalizeYmd(startDate);
   const normalizedEnd = normalizeYmd(endDate);
-
-  if (normalizedStart) {
-    nextQuery = nextQuery.gte('pay_time', toBeijingUtcStart(normalizedStart));
-  }
-  if (normalizedEnd) {
-    nextQuery = nextQuery.lt('pay_time', toBeijingUtcStart(addDaysYmd(normalizedEnd, 1)));
-  }
-
+  if (normalizedStart) nextQuery = nextQuery.gte('pay_time', toBeijingUtcStart(normalizedStart));
+  if (normalizedEnd) nextQuery = nextQuery.lt('pay_time', toBeijingUtcStart(addDaysYmd(normalizedEnd, 1)));
   return nextQuery;
 }
 
-function normalizePlatform(value?: string | null): 'android' | 'ios' | 'unknown' {
+function normalizePlatform(value?: string | null): PlatformType {
   const v = String(value ?? '').toLowerCase();
   if (v === 'android' || v === 'ios') return v;
   return 'unknown';
+}
+
+function getAttributionSource(inviteCode: string | null | undefined, campaignKeys?: Set<string>) {
+  const normalized = String(inviteCode ?? '').trim();
+  return campaignKeys && normalized && campaignKeys.has(normalized) ? 'adjust' : 'invite';
 }
 
 function formatDashboardUser(
@@ -149,7 +157,6 @@ function formatDashboardUser(
   bindTime: string | null,
   orders: RechargeRow[],
   campaignKeys?: Set<string>,
-  bindStatus?: string | null,
   appPlatform?: string | null
 ) {
   const paidOrders = orders.filter((item) => item.status === 'success');
@@ -158,14 +165,12 @@ function formatDashboardUser(
     .map((item) => item.pay_time)
     .sort((a, b) => new Date(a).getTime() - new Date(b).getTime());
 
-  const source = getAttributionSource(bindStatus, inviteCode, campaignKeys);
-
   return {
     platformUserId: userId,
     employeeName,
     inviteCode,
     bindTime,
-    source,
+    source: getAttributionSource(inviteCode, campaignKeys),
     appPlatform: normalizePlatform(appPlatform),
     firstRechargeAt: sortedTimes[0] ?? null,
     lastRechargeAt: sortedTimes[sortedTimes.length - 1] ?? null,
@@ -174,33 +179,17 @@ function formatDashboardUser(
   };
 }
 
-function getAttributionSource(
-  bindStatus?: string | null,
-  inviteCode?: string | null,
-  campaignKeys?: Set<string>
-): AttributionSource {
-  if (bindStatus === 'adjust') return 'adjust';
-  if (bindStatus === 'invite' || bindStatus === 'bound') return 'invite';
-  const normalizedInviteCode = String(inviteCode ?? '').trim();
-  return campaignKeys && normalizedInviteCode && campaignKeys.has(normalizedInviteCode) ? 'adjust' : 'invite';
-}
-
-function buildSummary(
-  attributions: AttributionRow[],
-  recharges: RechargeRow[],
-  campaignKeys?: Set<string>
-) {
+function buildSummary(attributions: AttributionRow[], recharges: RechargeRow[], campaignKeys?: Set<string>) {
   const attributedUserIds = new Set(attributions.map((item) => item.platform_user_id));
   const inviteUserIds = new Set<string>();
   const adjustUserIds = new Set<string>();
+
   for (const item of attributions) {
-    const source = getAttributionSource(item.bind_status, item.invite_code, campaignKeys);
-    if (source === 'adjust') {
-      adjustUserIds.add(item.platform_user_id);
-    } else {
-      inviteUserIds.add(item.platform_user_id);
-    }
+    const source = getAttributionSource(item.invite_code, campaignKeys);
+    if (source === 'adjust') adjustUserIds.add(item.platform_user_id);
+    else inviteUserIds.add(item.platform_user_id);
   }
+
   const paidUserIds = new Set(
     recharges.filter((item) => item.status === 'success').map((item) => item.platform_user_id)
   );
@@ -208,17 +197,18 @@ function buildSummary(
     .filter((item) => item.status === 'success')
     .reduce((sum, item) => sum + Number(item.amount || 0), 0);
 
-  // 按用户统计来源平台（每个用户取其归因记录的 app_platform，去重计数）
-  const platformByUser = new Map<string, string>();
+  const platformByUser = new Map<string, PlatformType>();
   for (const item of attributions) {
     if (!platformByUser.has(item.platform_user_id)) {
       platformByUser.set(item.platform_user_id, normalizePlatform(item.app_platform));
     }
   }
-  let androidUsers = 0, iosUsers = 0;
-  for (const p of platformByUser.values()) {
-    if (p === 'android') androidUsers++;
-    else if (p === 'ios') iosUsers++;
+
+  let androidUsers = 0;
+  let iosUsers = 0;
+  for (const platform of platformByUser.values()) {
+    if (platform === 'android') androidUsers += 1;
+    if (platform === 'ios') iosUsers += 1;
   }
 
   return {
@@ -234,10 +224,166 @@ function buildSummary(
   };
 }
 
+function addMonthsIso(value: string, months: number) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  const next = new Date(date.getTime());
+  next.setUTCMonth(next.getUTCMonth() + months);
+  return next.toISOString();
+}
+
+function toSelectDbDateTime(value: string | Date) {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toISOString().slice(0, 19).replace('T', ' ');
+}
+
+function usdToCents(usd: number) {
+  return Math.round(usd * 100);
+}
+
+async function buildLeadPulseIncomeRecharges(
+  attributions: AttributionRow[],
+  options: { payStartIso?: string; payEndIso?: string } = {}
+): Promise<RechargeRow[]> {
+  const userMeta = new Map<string, { employeeId: string; bindStart: string; bindEnd: string }>();
+  let globalStart = '';
+  let globalEnd = '';
+
+  for (const item of attributions) {
+    const userId = String(item.platform_user_id || '').trim();
+    if (!userId) continue;
+    const bindStart = toSelectDbDateTime(item.bind_time);
+    const bindEnd = toSelectDbDateTime(addMonthsIso(item.bind_time, 2));
+    if (!bindStart || !bindEnd) continue;
+    userMeta.set(userId, { employeeId: item.employee_id, bindStart, bindEnd });
+    globalStart = !globalStart || bindStart < globalStart ? bindStart : globalStart;
+    globalEnd = !globalEnd || bindEnd > globalEnd ? bindEnd : globalEnd;
+  }
+
+  if (!userMeta.size || !globalStart || !globalEnd) return [];
+
+  const payStart = options.payStartIso ? toSelectDbDateTime(options.payStartIso) : '';
+  const payEnd = options.payEndIso ? toSelectDbDateTime(options.payEndIso) : '';
+  const effectiveStart = payStart && payStart > globalStart ? payStart : globalStart;
+  const effectiveEnd = payEnd && payEnd < globalEnd ? payEnd : globalEnd;
+  if (effectiveStart && effectiveEnd && effectiveStart >= effectiveEnd) return [];
+
+  const rows: RechargeRow[] = [];
+  const userIds = Array.from(userMeta.keys());
+
+  for (let i = 0; i < userIds.length; i += 200) {
+    const chunk = userIds.slice(i, i + 200);
+    const placeholders = chunk.map(() => '?').join(',');
+    const incomeRows = await querySelectDB<SelectDbIncomeRow>(
+      `SELECT
+         CAST(account_id AS STRING) AS platform_user_id,
+         CAST(event_created_time AS STRING) AS pay_time,
+         CAST(properties['income_dollar'] AS DOUBLE) AS income_dollar
+       FROM recharge
+       WHERE CAST(account_id AS STRING) IN (${placeholders})
+         AND CAST(properties['pay_status'] AS STRING) IN ('1', '3')
+         AND event_created_time >= ?
+         AND event_created_time < ?`,
+      [...chunk, effectiveStart || globalStart, effectiveEnd || globalEnd]
+    );
+
+    for (const row of incomeRows) {
+      const userId = String(row.platform_user_id || '').trim();
+      const meta = userMeta.get(userId);
+      if (!meta) continue;
+      const payTime = String(row.pay_time || '').trim();
+      if (!payTime || payTime < meta.bindStart || payTime >= meta.bindEnd) continue;
+      const income = Number(row.income_dollar || 0);
+      if (!Number.isFinite(income) || income <= 0) continue;
+      rows.push({
+        employee_id: meta.employeeId,
+        platform_user_id: userId,
+        amount: usdToCents(income),
+        pay_time: payTime,
+        status: 'success'
+      });
+    }
+  }
+
+  return rows;
+}
+
+type DashboardUserItem = ReturnType<typeof formatDashboardUser>;
+
+// 用户明细在服务端做筛选+分页，避免把整个公司的用户数组一次性发给前端。
+function selectUsersPage(allUsers: DashboardUserItem[], body: DashboardRequest) {
+  const keyword = String(body.userIdKeyword ?? '').trim();
+  const employeeName = String(body.filterEmployee ?? '').trim();
+  let users = allUsers;
+  if (employeeName) users = users.filter((item) => item.employeeName === employeeName);
+  if (keyword) users = users.filter((item) => String(item.platformUserId).includes(keyword));
+  const totalUsers = users.length;
+  if (body.includeAllUsers) {
+    return { users, totalUsers };
+  }
+  const pageSize = Math.min(Math.max(Math.trunc(Number(body.pageSize) || 20), 1), 200);
+  const page = Math.max(Math.trunc(Number(body.page) || 1), 1);
+  return { users: users.slice((page - 1) * pageSize, page * pageSize), totalUsers };
+}
+
+function getTodayBeijingYmd() {
+  const formatter = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' });
+  return formatter.format(new Date());
+}
+
+// 员工端「团队今日数据」排行榜：同公司活跃员工今天(北京时区)的付费人数与充值总额，按金额降序。
+async function buildTodayTeamStats(companyId: string) {
+  const { data: allEmployees, error: employeesError } = await supabaseServer
+    .from('employees')
+    .select('id, employee_name, status')
+    .eq('company_id', companyId);
+  if (employeesError || !allEmployees || allEmployees.length === 0) return [];
+
+  const activeEmployees = allEmployees.filter((item) => item.status === 'active');
+  if (activeEmployees.length === 0) return [];
+  const activeEmployeeIds = activeEmployees.map((item) => item.id);
+
+  const today = getTodayBeijingYmd();
+  let todayRechargeQuery = supabaseServer
+    .from('recharge_orders')
+    .select('employee_id, platform_user_id, amount, status')
+    .eq('company_id', companyId)
+    .in('employee_id', activeEmployeeIds);
+  todayRechargeQuery = applyBeijingPayDateRange(todayRechargeQuery, today, today);
+
+  const todayRecharges = await fetchAll<RechargeRow>(todayRechargeQuery);
+
+  const statsByEmployee = new Map<string, { paidUserIds: Set<string>; totalAmount: number }>();
+  for (const order of todayRecharges) {
+    if (order.status !== 'success') continue;
+    let stats = statsByEmployee.get(order.employee_id);
+    if (!stats) {
+      stats = { paidUserIds: new Set(), totalAmount: 0 };
+      statsByEmployee.set(order.employee_id, stats);
+    }
+    stats.paidUserIds.add(order.platform_user_id);
+    stats.totalAmount += Number(order.amount || 0);
+  }
+
+  return activeEmployees
+    .map((item) => {
+      const stats = statsByEmployee.get(item.id);
+      return {
+        name: item.employee_name,
+        paidUsers: stats?.paidUserIds.size ?? 0,
+        totalAmount: stats?.totalAmount ?? 0
+      };
+    })
+    .filter((item) => item.paidUsers > 0 || item.totalAmount > 0)
+    .sort((a, b) => b.totalAmount - a.totalAmount);
+}
+
 export async function POST(request: Request) {
   try {
     const body = (await request.json()) as DashboardRequest;
-    const { companyId, role, userId, username, startDate, endDate, metricStartDate, metricEndDate } = body;
+    const { companyId, role, userId, username, startDate, endDate, metricStartDate, metricEndDate, forceRefresh } = body;
+    const lastSyncTime = readLastSyncTime();
 
     if (!companyId || !role || !userId || !username) {
       return NextResponse.json({ error: '缺少必要参数' }, { status: 400 });
@@ -263,32 +409,39 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: '角色信息不匹配' }, { status: 403 });
     }
 
-    const cacheKey = `${role}:${companyId}:${userId}:${startDate || ''}:${endDate || ''}:${metricStartDate || ''}:${metricEndDate || ''}`;
-    const cached = cacheGet(cacheKey);
-    if (cached) {
-      return NextResponse.json(cached);
+    const cacheKey = JSON.stringify([
+      companyId,
+      role,
+      userId,
+      normalizeYmd(startDate),
+      normalizeYmd(endDate),
+      normalizeYmd(metricStartDate),
+      normalizeYmd(metricEndDate)
+    ]);
+    const respond = (payload: { users: DashboardUserItem[] } & Record<string, unknown>) =>
+      NextResponse.json({ ...payload, ...selectUsersPage(payload.users, body), lastSyncTime });
+
+    if (!forceRefresh) {
+      const cached = getOverviewCache(cacheKey);
+      if (cached) {
+        return respond(cached);
+      }
     }
 
     if (role === 'boss') {
       let summaryRechargeQuery = supabaseServer
         .from('recharge_orders')
-        .select('employee_id, platform_user_id, amount, status')
+        .select('employee_id, platform_user_id, amount, pay_time, status')
         .eq('company_id', companyId);
 
       let summaryAttributionQuery = supabaseServer
         .from('attribution_users')
-        .select('employee_id, platform_user_id, invite_code, bind_time, bind_status, app_platform')
+        .select('employee_id, platform_user_id, invite_code, bind_time, app_platform')
         .eq('company_id', companyId);
 
       summaryAttributionQuery = applyBeijingBindDateRange(summaryAttributionQuery, metricStartDate, metricEndDate);
-      // ⚠️ 重要约束：员工的「充值金额 / 充值笔数」必须查全量（LTV 语义），
-      // 绝对不能给 summaryRechargeQuery 加 pay_time 过滤，否则会把历史充值切掉、
-      // distinct user 算少。只有 summaryAttributionQuery 受 metricStartDate/metricEndDate
-      // 影响（用于按归因期筛「新增徒弟」），summaryRechargeQuery 保持全量。
+      summaryRechargeQuery = applyBeijingPayDateRange(summaryRechargeQuery, metricStartDate, metricEndDate);
 
-      // ⚠️ 重要约束：用户的「充值金额 / 充值笔数」必须查全量（LTV 语义），
-      // 绝对不能给 userRechargeQuery 加 pay_time 过滤，否则会把历史充值切掉。
-      // 只有 userAttributionQuery 受 startDate/endDate 影响（用于按归因期筛用户）。
       let userRechargeQuery = supabaseServer
         .from('recharge_orders')
         .select('employee_id, platform_user_id, amount, pay_time, status')
@@ -296,13 +449,18 @@ export async function POST(request: Request) {
 
       let userAttributionQuery = supabaseServer
         .from('attribution_users')
-        .select('employee_id, platform_user_id, invite_code, bind_time, bind_status, app_platform')
+        .select('employee_id, platform_user_id, invite_code, bind_time, app_platform')
         .eq('company_id', companyId);
 
       userAttributionQuery = applyBeijingBindDateRange(userAttributionQuery, startDate, endDate);
-      // 注意：userRechargeQuery 故意不调 applyBeijingPayDateRange，保持全量。
 
-      const [employeesResult, summaryAttributions, summaryRecharges, userAttributions, userRecharges] = await Promise.all([
+      // 默认无筛选时，用户明细范围与指标范围一致，此时避免对 attribution_users /
+      // recharge_orders 各拉两遍相同全量数据（summary 与 user 复用同一结果集）。
+      const sameAttributionRange = normalizeYmd(metricStartDate) === normalizeYmd(startDate)
+        && normalizeYmd(metricEndDate) === normalizeYmd(endDate);
+      const metricRangeEmpty = !normalizeYmd(metricStartDate) && !normalizeYmd(metricEndDate);
+
+      const [employeesResult, summaryAttributions, summaryRecharges, userAttributionsRaw, userRechargesRaw] = await Promise.all([
         supabaseServer
           .from('employees')
           .select('id, account_id, employee_name, invite_code, inviter_id, attribution_key, status')
@@ -310,55 +468,66 @@ export async function POST(request: Request) {
           .order('created_at', { ascending: true }),
         fetchAll<AttributionRow>(summaryAttributionQuery.order('bind_time', { ascending: false })),
         fetchAll<RechargeRow>(summaryRechargeQuery.order('pay_time', { ascending: false })),
-        fetchAll<AttributionRow>(userAttributionQuery.order('bind_time', { ascending: false })),
-        fetchAll<RechargeRow>(userRechargeQuery.order('pay_time', { ascending: false }))
+        sameAttributionRange
+          ? Promise.resolve(null)
+          : fetchAll<AttributionRow>(userAttributionQuery.order('bind_time', { ascending: false })),
+        // userRecharge 不做日期过滤（按用户 LTV 全量）；metric 范围为空时与 summaryRecharge 相同，可复用。
+        metricRangeEmpty
+          ? Promise.resolve(null)
+          : fetchAll<RechargeRow>(userRechargeQuery.order('pay_time', { ascending: false }))
       ]);
+
+      const userAttributions = userAttributionsRaw ?? summaryAttributions;
+      const userRecharges = userRechargesRaw ?? summaryRecharges;
 
       if (employeesResult.error) {
         return NextResponse.json({ error: '读取控制台数据失败' }, { status: 500 });
       }
 
       const employees = (employeesResult.data ?? []) as EmployeeRow[];
-      // 所有员工的 attribution_key（campaign）集合，用于判断用户来源
-      const campaignKeys = new Set(
-        employees.map((e) => (e.attribution_key ?? '').trim()).filter(Boolean)
-      );
-
-      // If a date filter is applied, we only want to consider users who bound in this period
-      const hasDateFilter = !!startDate || !!endDate;
-      const validUserIds = new Set(userAttributions.map(a => a.platform_user_id));
-      
-      // Filter recharges to only include valid users (if date filter applied)
-      // If no date filter, validUserIds contains all attributions. We might still want to include recharges for users with no attribution.
-      const filteredRecharges = hasDateFilter 
-        ? userRecharges.filter(r => validUserIds.has(r.platform_user_id))
-        : userRecharges;
-
+      const campaignKeys = new Set(employees.map((e) => String(e.attribution_key ?? '').trim()).filter(Boolean));
       const summary = buildSummary(summaryAttributions, summaryRecharges, campaignKeys);
 
       const { data: accountsData } = await supabaseServer
         .from('company_accounts')
         .select('id, username')
         .eq('company_id', companyId);
-      const accountMap = new Map(accountsData?.map(a => [a.id, a.username]) || []);
+      const accountMap = new Map(accountsData?.map((a) => [a.id, a.username]) || []);
+
+      // 按 employee_id 一次分组，避免对每个员工都做整表 filter（O(员工数×数据量)）。
+      const attributionsByEmployee = new Map<string, AttributionRow[]>();
+      for (const item of summaryAttributions) {
+        const list = attributionsByEmployee.get(item.employee_id);
+        if (list) list.push(item);
+        else attributionsByEmployee.set(item.employee_id, [item]);
+      }
+      const rechargesByEmployee = new Map<string, RechargeRow[]>();
+      for (const item of summaryRecharges) {
+        const list = rechargesByEmployee.get(item.employee_id);
+        if (list) list.push(item);
+        else rechargesByEmployee.set(item.employee_id, [item]);
+      }
 
       const employeeRows = employees.map((employee) => {
-        const employeeUsers = summaryAttributions.filter((item) => item.employee_id === employee.id);
-        const employeeOrders = summaryRecharges.filter((item) => item.employee_id === employee.id);
-        const employeeCampaignKeys = new Set(
-          [String(employee.attribution_key ?? '').trim()].filter(Boolean)
-        );
-        const employeeSummary = buildSummary(employeeUsers, employeeOrders, employeeCampaignKeys);
-        return { 
-          id: employee.id, 
-          name: employee.employee_name, 
+        const employeeUsers = attributionsByEmployee.get(employee.id) ?? [];
+        const employeeOrders = rechargesByEmployee.get(employee.id) ?? [];
+        const employeeCampaignKeys = new Set([String(employee.attribution_key ?? '').trim()].filter(Boolean));
+        return {
+          id: employee.id,
+          name: employee.employee_name,
           username: accountMap.get(employee.account_id) ?? '',
-          inviteCode: employee.invite_code, 
-          inviterId: employee.inviter_id ?? null, 
-          status: employee.status, 
-          ...employeeSummary 
+          inviteCode: employee.invite_code,
+          inviterId: employee.inviter_id ?? null,
+          status: employee.status,
+          ...buildSummary(employeeUsers, employeeOrders, employeeCampaignKeys)
         };
       });
+
+      const hasDateFilter = !!startDate || !!endDate;
+      const validUserIds = new Set(userAttributions.map((item) => item.platform_user_id));
+      const filteredRecharges = hasDateFilter
+        ? userRecharges.filter((item) => validUserIds.has(item.platform_user_id))
+        : userRecharges;
 
       const employeeMap = new Map(employees.map((item) => [item.id, item]));
       const ordersByUser = new Map<string, RechargeRow[]>();
@@ -369,15 +538,15 @@ export async function POST(request: Request) {
       }
 
       const attributionMap = new Map<string, AttributionRow>();
-      for (const a of userAttributions) {
-        attributionMap.set(a.platform_user_id, a);
+      for (const item of userAttributions) {
+        if (!attributionMap.has(item.platform_user_id)) attributionMap.set(item.platform_user_id, item);
       }
 
-      const allUserIds = hasDateFilter 
-        ? new Set(userAttributions.map((a) => a.platform_user_id))
+      const allUserIds = hasDateFilter
+        ? new Set(userAttributions.map((item) => item.platform_user_id))
         : new Set([
-            ...userAttributions.map((a) => a.platform_user_id),
-            ...filteredRecharges.map((r) => r.platform_user_id)
+            ...userAttributions.map((item) => item.platform_user_id),
+            ...filteredRecharges.map((item) => item.platform_user_id)
           ]);
 
       const users = Array.from(allUserIds).map((platformUserId) => {
@@ -385,7 +554,6 @@ export async function POST(request: Request) {
         const userOrders = ordersByUser.get(platformUserId) ?? [];
         const employeeId = attr?.employee_id ?? userOrders[0]?.employee_id;
         const emp = employeeId ? employeeMap.get(employeeId) : undefined;
-        
         return formatDashboardUser(
           platformUserId,
           attr?.invite_code ?? emp?.invite_code ?? '-',
@@ -393,23 +561,21 @@ export async function POST(request: Request) {
           attr?.bind_time ?? null,
           userOrders,
           campaignKeys,
-          attr?.bind_status ?? null,
           attr?.app_platform ?? null
         );
       });
 
-      const payload = {
+      const bossPayload = {
         role,
         currentUser: { name: account.name, username: account.username },
         summary: { ...summary, employeeCount: employees.length },
         employees: employeeRows,
         users
       };
-      cacheSet(cacheKey, payload);
-      return NextResponse.json(payload);
+      setOverviewCache(cacheKey, bossPayload);
+      return respond(bossPayload);
     }
 
-    // staff
     const { data: employee, error: employeeError } = await supabaseServer
       .from('employees')
       .select('id, account_id, employee_name, invite_code, inviter_id, attribution_key, status')
@@ -421,30 +587,24 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: '未找到员工资料' }, { status: 404 });
     }
 
-    // 该员工的 attribution_key（campaign）集合
-    const staffCampaignKeys = new Set(
-      [String((employee as EmployeeRow).attribution_key ?? '').trim()].filter(Boolean)
-    );
+    const staffCampaignKeys = new Set([String((employee as EmployeeRow).attribution_key ?? '').trim()].filter(Boolean));
+    const isLeadPulseStaff = companyId === LEADPULSE_COMPANY_ID;
 
     let summaryRechargeQuery = supabaseServer
       .from('recharge_orders')
-      .select('employee_id, platform_user_id, amount, status')
+      .select('employee_id, platform_user_id, amount, pay_time, status')
       .eq('company_id', companyId)
       .eq('employee_id', employee.id);
 
     let summaryAttributionQuery = supabaseServer
       .from('attribution_users')
-      .select('employee_id, platform_user_id, invite_code, bind_time, bind_status, app_platform')
+      .select('employee_id, platform_user_id, invite_code, bind_time, app_platform')
       .eq('company_id', companyId)
       .eq('employee_id', employee.id);
 
     summaryAttributionQuery = applyBeijingBindDateRange(summaryAttributionQuery, metricStartDate, metricEndDate);
-    // ⚠️ 重要约束：员工端的「充值金额 / 充值笔数」也必须查全量（LTV 语义），
-    // 绝对不能给 summaryRechargeQuery 加 pay_time 过滤，否则会把历史充值切掉、
-    // distinct user 算少。
+    summaryRechargeQuery = applyBeijingPayDateRange(summaryRechargeQuery, metricStartDate, metricEndDate);
 
-    // ⚠️ 重要约束：员工端的「充值金额 / 充值笔数」也必须查全量（LTV 语义），
-    // 绝对不能给 rechargeQuery 加 pay_time 过滤，否则会把历史充值切掉。
     let rechargeQuery = supabaseServer
       .from('recharge_orders')
       .select('employee_id, platform_user_id, amount, pay_time, status')
@@ -453,44 +613,34 @@ export async function POST(request: Request) {
 
     let attributionQuery = supabaseServer
       .from('attribution_users')
-      .select('employee_id, platform_user_id, invite_code, bind_time, bind_status, app_platform')
+      .select('employee_id, platform_user_id, invite_code, bind_time, app_platform')
       .eq('company_id', companyId)
       .eq('employee_id', employee.id);
 
     attributionQuery = applyBeijingBindDateRange(attributionQuery, startDate, endDate);
 
-    // 查询今天的团队数据（所有同公司员工的今日付费数据）
-    const today = getTodayBeijing();
-    const { data: allEmployees } = await supabaseServer
-      .from('employees')
-      .select('id, employee_name, status')
-      .eq('company_id', companyId);
-
-    const activeEmployeeIds = (allEmployees ?? [])
-      .filter((e: { status: string }) => e.status === 'active')
-      .map((e: { id: string }) => e.id);
-
-    let todayTeamRechargeQuery = supabaseServer
-      .from('recharge_orders')
-      .select('employee_id, platform_user_id, amount, status')
-      .eq('company_id', companyId)
-      .in('employee_id', activeEmployeeIds);
-
-    todayTeamRechargeQuery = applyBeijingPayDateRange(todayTeamRechargeQuery, today, today);
-
-    const [summaryAttributions, summaryRecharges, attributions, recharges, todayTeamRecharges] = await Promise.all([
+    const [summaryAttributions, summaryRechargesRaw, attributions, rechargesRaw] = await Promise.all([
       fetchAll<AttributionRow>(summaryAttributionQuery.order('bind_time', { ascending: false })),
       fetchAll<RechargeRow>(summaryRechargeQuery.order('pay_time', { ascending: false })),
       fetchAll<AttributionRow>(attributionQuery.order('bind_time', { ascending: false })),
-      fetchAll<RechargeRow>(rechargeQuery.order('pay_time', { ascending: false })),
-      fetchAll<RechargeRow>(todayTeamRechargeQuery.order('pay_time', { ascending: false }))
+      fetchAll<RechargeRow>(rechargeQuery.order('pay_time', { ascending: false }))
     ]);
 
-    const hasDateFilter = !!startDate || !!endDate;
-    const validUserIds = new Set(attributions.map(a => a.platform_user_id));
+    const summaryRecharges = isLeadPulseStaff
+      ? await buildLeadPulseIncomeRecharges(summaryAttributions, {
+          payStartIso: metricStartDate ? toBeijingUtcStart(metricStartDate) : undefined,
+          payEndIso: metricEndDate ? toBeijingUtcStart(addDaysYmd(metricEndDate, 1)) : undefined
+        })
+      : summaryRechargesRaw;
 
+    const recharges = isLeadPulseStaff
+      ? await buildLeadPulseIncomeRecharges(attributions)
+      : rechargesRaw;
+
+    const hasDateFilter = !!startDate || !!endDate;
+    const validUserIds = new Set(attributions.map((item) => item.platform_user_id));
     const filteredRecharges = hasDateFilter
-      ? recharges.filter(r => validUserIds.has(r.platform_user_id))
+      ? recharges.filter((item) => validUserIds.has(item.platform_user_id))
       : recharges;
 
     const summary = buildSummary(summaryAttributions, summaryRecharges, staffCampaignKeys);
@@ -502,21 +652,20 @@ export async function POST(request: Request) {
     }
 
     const attributionMap = new Map<string, AttributionRow>();
-    for (const a of attributions) {
-      attributionMap.set(a.platform_user_id, a);
+    for (const item of attributions) {
+      if (!attributionMap.has(item.platform_user_id)) attributionMap.set(item.platform_user_id, item);
     }
 
     const allUserIds = hasDateFilter
-      ? new Set(attributions.map((a) => a.platform_user_id))
+      ? new Set(attributions.map((item) => item.platform_user_id))
       : new Set([
-          ...attributions.map((a) => a.platform_user_id),
-          ...filteredRecharges.map((r) => r.platform_user_id)
+          ...attributions.map((item) => item.platform_user_id),
+          ...filteredRecharges.map((item) => item.platform_user_id)
         ]);
 
     const users = Array.from(allUserIds).map((platformUserId) => {
       const attr = attributionMap.get(platformUserId);
       const userOrders = ordersByUser.get(platformUserId) ?? [];
-
       return formatDashboardUser(
         platformUserId,
         attr?.invite_code ?? employee.invite_code,
@@ -524,44 +673,27 @@ export async function POST(request: Request) {
         attr?.bind_time ?? null,
         userOrders,
         staffCampaignKeys,
-        attr?.bind_status ?? null,
         attr?.app_platform ?? null
       );
     });
 
-    // 构建今天的团队数据
-    const employeeMap = new Map((allEmployees ?? []).map((e: { id: string; employee_name: string }) => [e.id, e.employee_name]));
-    const todayTeamStatsMap = new Map<string, { paidUserIds: Set<string>; totalAmount: number }>();
+    const todayTeamStats = await buildTodayTeamStats(companyId);
 
-    for (const order of todayTeamRecharges) {
-      if (order.status !== 'success') continue;
-      const empId = order.employee_id;
-      if (!todayTeamStatsMap.has(empId)) {
-        todayTeamStatsMap.set(empId, { paidUserIds: new Set(), totalAmount: 0 });
-      }
-      const stats = todayTeamStatsMap.get(empId)!;
-      stats.paidUserIds.add(order.platform_user_id);
-      stats.totalAmount += Number(order.amount || 0);
-    }
-
-    const todayTeamStats = Array.from(todayTeamStatsMap.entries())
-      .map(([empId, stats]) => ({
-        name: employeeMap.get(empId) ?? '未知',
-        paidUsers: stats.paidUserIds.size,
-        totalAmount: stats.totalAmount
-      }))
-      .sort((a, b) => b.totalAmount - a.totalAmount); // 按充值金额降序
-
-    const payload = {
+    const staffPayload = {
       role,
       currentUser: { name: account.name, username: account.username },
       summary,
-      profile: { name: employee.employee_name, inviteCode: employee.invite_code, inviterId: employee.inviter_id ?? null, status: employee.status },
+      profile: {
+        name: employee.employee_name,
+        inviteCode: employee.invite_code,
+        inviterId: employee.inviter_id ?? null,
+        status: employee.status
+      },
       todayTeamStats,
       users
     };
-    cacheSet(cacheKey, payload);
-    return NextResponse.json(payload);
+    setOverviewCache(cacheKey, staffPayload);
+    return respond(staffPayload);
   } catch (error) {
     console.error('读取控制台概览失败', error);
     return NextResponse.json({ error: '服务器出了点问题，请稍后重试' }, { status: 500 });

@@ -102,10 +102,25 @@ export async function GET(request: Request) {
 
     const employees = (employeesResult.data ?? []) as EmployeeRow[];
 
+    // 按 employee_id 一次分组，避免对每个员工都做整表 filter（O(员工数×数据量)）。
+    const attributionsByEmployee = new Map<string, AttributionRow[]>();
+    for (const item of attributions) {
+      const list = attributionsByEmployee.get(item.employee_id);
+      if (list) list.push(item);
+      else attributionsByEmployee.set(item.employee_id, [item]);
+    }
+    const rechargesByEmployee = new Map<string, RechargeRow[]>();
+    for (const item of recharges) {
+      const list = rechargesByEmployee.get(item.employee_id);
+      if (list) list.push(item);
+      else rechargesByEmployee.set(item.employee_id, [item]);
+    }
+
     const responseRows = employees.map((employee) => {
-      const employeeAttributions = attributions.filter((item) => item.employee_id === employee.id);
-      const employeeRecharges = recharges.filter((item) => item.employee_id === employee.id);
-      const summary = buildSummary(employeeAttributions, employeeRecharges);
+      const summary = buildSummary(
+        attributionsByEmployee.get(employee.id) ?? [],
+        rechargesByEmployee.get(employee.id) ?? []
+      );
 
       return {
         id: employee.id,
@@ -353,7 +368,7 @@ export async function PUT(request: Request) {
       }
     }
 
-    const accountUpdate: any = {};
+    const accountUpdate: { username?: string; password_hash?: string; name?: string } = {};
     if (username) accountUpdate.username = username.trim();
     if (password) accountUpdate.password_hash = password;
     if (employeeName) accountUpdate.name = employeeName.trim();
@@ -363,7 +378,7 @@ export async function PUT(request: Request) {
       if (accError) return NextResponse.json({ error: '更新账号信息失败' }, { status: 500 });
     }
 
-    const employeeUpdate: any = {};
+    const employeeUpdate: { employee_name?: string; invite_code?: string; inviter_id?: string | null } = {};
     if (employeeName) employeeUpdate.employee_name = employeeName.trim();
     if (inviteCode) employeeUpdate.invite_code = inviteCode;
     if (inviterIdValue !== undefined) employeeUpdate.inviter_id = inviterIdValue || null;

@@ -83,7 +83,7 @@ function toFiniteNumber(value) {
 
 function normalizeStatus(value) {
   const raw = String(value ?? '').toLowerCase();
-  if (['success', 'paid', 'pay_success', 'completed', 'finish', 'finished', '1'].includes(raw)) {
+  if (['success', 'paid', 'pay_success', 'completed', 'finish', 'finished', '1', '3'].includes(raw)) {
     return 'success';
   }
   if (['failed', 'fail', '0', 'closed', 'cancel'].includes(raw)) {

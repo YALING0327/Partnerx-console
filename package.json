@@ -7,10 +7,13 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start -p 3001",
+    "start:partnerx": "next start -p 3001",
     "sync:selectdb": "node scripts/sync-selectdb.mjs",
     "sync:selectdb:dry": "DRY_RUN=1 node scripts/sync-selectdb.mjs",
+    "audit:company-history": "node scripts/audit-company-history.mjs",
     "reconcile:attribution": "node scripts/reconcile-attribution.mjs",
     "reconcile:recharge": "node scripts/reconcile-recharge.mjs",
+    "repair:recharge:recent": "node scripts/repair-recent-recharge-anomalies.mjs",
     "add:boss": "node scripts/create-boss.mjs"
   },
   "dependencies": {

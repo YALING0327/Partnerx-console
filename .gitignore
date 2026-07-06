@@ -5,3 +5,10 @@ npm-debug.log*
 .vercel/
 .DS_Store
 *.pem
+
+# 一次性调试/排障脚本与调试产物，不应进入仓库
+tmp_*
+.dbg/
+tsconfig.tsbuildinfo
+.selectdb-sync-cursor.json
+*.xlsx
