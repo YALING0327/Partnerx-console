@@ -2,8 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { NextResponse } from 'next/server';
 import { supabaseServer, fetchAll } from '@/lib/supabase-server';
-import { querySelectDB } from '@/lib/selectdb';
 import { getOverviewCache, setOverviewCache } from '@/lib/dashboard-overview-cache';
+import { buildLeadPulseIncomeRecharges } from '@/lib/leadpulse-income';
 
 type LoginRole = 'boss' | 'staff';
 
@@ -49,12 +49,6 @@ type RechargeRow = {
   amount: number;
   pay_time: string;
   status: string;
-};
-
-type SelectDbIncomeRow = {
-  platform_user_id: string;
-  pay_time: string;
-  income_dollar: number | string | null;
 };
 
 type PlatformType = 'android' | 'ios' | 'unknown';
@@ -222,91 +216,6 @@ function buildSummary(attributions: AttributionRow[], recharges: RechargeRow[], 
     totalAmount,
     arppu: paidUserIds.size ? totalAmount / paidUserIds.size : 0
   };
-}
-
-function addMonthsIso(value: string, months: number) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  const next = new Date(date.getTime());
-  next.setUTCMonth(next.getUTCMonth() + months);
-  return next.toISOString();
-}
-
-function toSelectDbDateTime(value: string | Date) {
-  const date = value instanceof Date ? value : new Date(value);
-  if (Number.isNaN(date.getTime())) return '';
-  return date.toISOString().slice(0, 19).replace('T', ' ');
-}
-
-function usdToCents(usd: number) {
-  return Math.round(usd * 100);
-}
-
-async function buildLeadPulseIncomeRecharges(
-  attributions: AttributionRow[],
-  options: { payStartIso?: string; payEndIso?: string } = {}
-): Promise<RechargeRow[]> {
-  const userMeta = new Map<string, { employeeId: string; bindStart: string; bindEnd: string }>();
-  let globalStart = '';
-  let globalEnd = '';
-
-  for (const item of attributions) {
-    const userId = String(item.platform_user_id || '').trim();
-    if (!userId) continue;
-    const bindStart = toSelectDbDateTime(item.bind_time);
-    const bindEnd = toSelectDbDateTime(addMonthsIso(item.bind_time, 2));
-    if (!bindStart || !bindEnd) continue;
-    userMeta.set(userId, { employeeId: item.employee_id, bindStart, bindEnd });
-    globalStart = !globalStart || bindStart < globalStart ? bindStart : globalStart;
-    globalEnd = !globalEnd || bindEnd > globalEnd ? bindEnd : globalEnd;
-  }
-
-  if (!userMeta.size || !globalStart || !globalEnd) return [];
-
-  const payStart = options.payStartIso ? toSelectDbDateTime(options.payStartIso) : '';
-  const payEnd = options.payEndIso ? toSelectDbDateTime(options.payEndIso) : '';
-  const effectiveStart = payStart && payStart > globalStart ? payStart : globalStart;
-  const effectiveEnd = payEnd && payEnd < globalEnd ? payEnd : globalEnd;
-  if (effectiveStart && effectiveEnd && effectiveStart >= effectiveEnd) return [];
-
-  const rows: RechargeRow[] = [];
-  const userIds = Array.from(userMeta.keys());
-
-  for (let i = 0; i < userIds.length; i += 200) {
-    const chunk = userIds.slice(i, i + 200);
-    const placeholders = chunk.map(() => '?').join(',');
-    const incomeRows = await querySelectDB<SelectDbIncomeRow>(
-      `SELECT
-         CAST(account_id AS STRING) AS platform_user_id,
-         CAST(event_created_time AS STRING) AS pay_time,
-         CAST(properties['income_dollar'] AS DOUBLE) AS income_dollar
-       FROM recharge
-       WHERE CAST(account_id AS STRING) IN (${placeholders})
-         AND CAST(properties['pay_status'] AS STRING) IN ('1', '3')
-         AND event_created_time >= ?
-         AND event_created_time < ?`,
-      [...chunk, effectiveStart || globalStart, effectiveEnd || globalEnd]
-    );
-
-    for (const row of incomeRows) {
-      const userId = String(row.platform_user_id || '').trim();
-      const meta = userMeta.get(userId);
-      if (!meta) continue;
-      const payTime = String(row.pay_time || '').trim();
-      if (!payTime || payTime < meta.bindStart || payTime >= meta.bindEnd) continue;
-      const income = Number(row.income_dollar || 0);
-      if (!Number.isFinite(income) || income <= 0) continue;
-      rows.push({
-        employee_id: meta.employeeId,
-        platform_user_id: userId,
-        amount: usdToCents(income),
-        pay_time: payTime,
-        status: 'success'
-      });
-    }
-  }
-
-  return rows;
 }
 
 type DashboardUserItem = ReturnType<typeof formatDashboardUser>;
