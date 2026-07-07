@@ -1,7 +1,6 @@
 import crypto from 'node:crypto';
 import { NextResponse } from 'next/server';
 import { supabaseServer, fetchAll } from '@/lib/supabase-server';
-import { buildLeadPulseIncomeRecharges } from '@/lib/leadpulse-income';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -13,6 +12,7 @@ const FEISHU_WEBHOOK =
 const FEISHU_SECRET = process.env.FEISHU_LEADPULSE_SECRET || '1kcMh0S8MKYSyb2ycV9xog';
 
 type AttrRow = { employee_id: string; platform_user_id: string; bind_time: string };
+type RechargeRow = { employee_id: string; platform_user_id: string; amount: number; status: string };
 type EmployeeRow = { id: string; employee_name: string; status: string };
 
 type EmployeeStat = {
@@ -99,24 +99,21 @@ async function computeRangeStats(startYmd: string, endYmd: string): Promise<{
     set.add(row.platform_user_id);
   }
 
-  // 充值：候选用户 = 绑定时间在 (start-2个月 ~ end] 内的用户（只有其绑定后 2 个月窗口才可能覆盖本区间）
-  const candidateAttrs = await fetchAll<AttrRow>(
+  // 充值：以「老板端」口径为准——直接读 recharge_orders 全量成功订单（未扣手续费、无60天窗口），
+  // pay_time 落在区间内。区别于员工端(income_dollar，近60天且扣费)。
+  const recharges = await fetchAll<RechargeRow>(
     supabaseServer
-      .from('attribution_users')
-      .select('employee_id, platform_user_id, bind_time')
+      .from('recharge_orders')
+      .select('employee_id, platform_user_id, amount, status')
       .eq('company_id', LEADPULSE_COMPANY_ID)
-      .gte('bind_time', toBeijingUtcStart(addDaysYmd(startYmd, -70)))
-      .lt('bind_time', toBeijingUtcStart(addDaysYmd(endYmd, 1)))
+      .gte('pay_time', toBeijingUtcStart(startYmd))
+      .lt('pay_time', toBeijingUtcStart(addDaysYmd(endYmd, 1)))
   );
-
-  const recharges = await buildLeadPulseIncomeRecharges(candidateAttrs, {
-    payStartIso: toBeijingUtcStart(startYmd),
-    payEndIso: toBeijingUtcStart(addDaysYmd(endYmd, 1))
-  });
 
   const paidByEmployee = new Map<string, Set<string>>();
   const amountByEmployee = new Map<string, number>();
   for (const r of recharges) {
+    if (r.status !== 'success') continue;
     let set = paidByEmployee.get(r.employee_id);
     if (!set) paidByEmployee.set(r.employee_id, (set = new Set()));
     set.add(r.platform_user_id);
@@ -179,7 +176,7 @@ function buildCard(params: {
         elements: [
           {
             tag: 'plain_text',
-            content: `口径：北京时间 ${rangeLabel}｜充值按 income_dollar 且绑定后2个月内计`
+            content: `口径：北京时间 ${rangeLabel}｜充值以老板端为准（全量成功订单，未扣手续费）`
           }
         ]
       }
