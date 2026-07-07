@@ -112,7 +112,11 @@ function addDaysYmd(ymd: string, days: number) {
 }
 
 function toBeijingUtcStart(ymd: string) {
-  return new Date(`${normalizeYmd(ymd)}T00:00:00+08:00`).toISOString();
+  // 注意：SelectDB 用北京时间(UTC+8)，而同步脚本 toIso 在 UTC 服务器上把「北京墙上时间」
+  // 当成 UTC 存成了带 Z 的字符串。所以库里的 bind_time/pay_time 实际是北京墙上时间(尾巴写了Z)。
+  // 因此按「北京自然日」过滤时边界也要用同一约定：直接取该日 00:00 的 Z 串，
+  // 不能再 +08:00，否则会二次偏移 8 小时（傍晚注册的用户被算到第二天）。
+  return `${normalizeYmd(ymd)}T00:00:00.000Z`;
 }
 
 function applyBeijingBindDateRange<T extends { gte: Function; lt: Function }>(query: T, startDate?: string, endDate?: string) {
@@ -593,7 +597,8 @@ export async function POST(request: Request) {
       );
     });
 
-    const todayTeamStats = await buildTodayTeamStats(companyId);
+    // LeadPulse 员工端不展示「团队今日数据」竞争榜（口径与其它区域不一致，按需求隐藏）。
+    const todayTeamStats = isLeadPulseStaff ? undefined : await buildTodayTeamStats(companyId);
 
     const staffPayload = {
       role,

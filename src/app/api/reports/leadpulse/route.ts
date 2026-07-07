@@ -55,7 +55,10 @@ function mondayOf(ymd: string) {
 }
 
 function toBeijingUtcStart(ymd: string) {
-  return new Date(`${normalizeYmd(ymd)}T00:00:00+08:00`).toISOString();
+  // 注意：SelectDB 用北京时间(UTC+8)，同步脚本把「北京墙上时间」当成 UTC 存成了带 Z 的字符串，
+  // 所以库里的 bind_time/pay_time 实际是北京墙上时间(尾巴写了Z)。按北京自然日过滤时边界要用同一约定：
+  // 直接取该日 00:00 的 Z 串，不能再 +08:00，否则会二次偏移 8 小时。
+  return `${normalizeYmd(ymd)}T00:00:00.000Z`;
 }
 
 function feishuSign(secret: string, timestampSec: number) {
