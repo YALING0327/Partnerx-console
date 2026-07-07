@@ -4,6 +4,7 @@ export type StoredUser = {
   role: 'boss' | 'staff';
   username: string;
   name: string | null;
+  companyName?: string | null;
 };
 
 export type BossEmployee = {
@@ -58,6 +59,7 @@ type SummaryBase = {
 export type DashboardData =
   | {
       role: 'boss';
+      companyName?: string | null;
       currentUser: { name: string | null; username: string };
       lastSyncTime: string | null;
       summary: SummaryBase & { employeeCount: number };
@@ -67,6 +69,7 @@ export type DashboardData =
     }
   | {
       role: 'staff';
+      companyName?: string | null;
       currentUser: { name: string | null; username: string };
       lastSyncTime: string | null;
       summary: SummaryBase;

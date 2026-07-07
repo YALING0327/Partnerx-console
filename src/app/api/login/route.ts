@@ -50,9 +50,22 @@ export async function POST(request: Request) {
 
     failMap.delete(username);
 
+    const { data: company } = await supabaseServer
+      .from('companies')
+      .select('company_name')
+      .eq('id', user.company_id)
+      .single();
+
     return NextResponse.json({
       message: '登录成功',
-      user: { id: user.id, companyId: user.company_id, role: user.role, username: user.username, name: user.name }
+      user: {
+        id: user.id,
+        companyId: user.company_id,
+        role: user.role,
+        username: user.username,
+        name: user.name,
+        companyName: company?.company_name ?? null
+      }
     });
   } catch (error) {
     console.error('登录接口异常', error);

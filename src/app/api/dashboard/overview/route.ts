@@ -409,6 +409,13 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: '角色信息不匹配' }, { status: 403 });
     }
 
+    const { data: company } = await supabaseServer
+      .from('companies')
+      .select('company_name')
+      .eq('id', companyId)
+      .single();
+    const companyName = company?.company_name ?? null;
+
     const cacheKey = JSON.stringify([
       companyId,
       role,
@@ -419,7 +426,7 @@ export async function POST(request: Request) {
       normalizeYmd(metricEndDate)
     ]);
     const respond = (payload: { users: DashboardUserItem[] } & Record<string, unknown>) =>
-      NextResponse.json({ ...payload, ...selectUsersPage(payload.users, body), lastSyncTime });
+      NextResponse.json({ ...payload, companyName, ...selectUsersPage(payload.users, body), lastSyncTime });
 
     if (!forceRefresh) {
       const cached = getOverviewCache(cacheKey);

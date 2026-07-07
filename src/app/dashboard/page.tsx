@@ -108,6 +108,7 @@ export default function DashboardPage() {
   const isBoss = user.role === 'boss';
   const bossData = data?.role === 'boss' ? data : null;
   const employees = bossData?.employees ?? [];
+  const brandName = data?.companyName || user.companyName || 'PARTNERX';
 
   // 聊天记录仅对老板开放
   const navItems: { key: View; label: string }[] = isBoss
@@ -128,10 +129,9 @@ export default function DashboardPage() {
     <main className="dashboardPage">
       <aside className="sidebar">
         <div className="sidebarBrand">
-          <div className="sidebarLogo">PX</div>
+          <div className="sidebarLogo">{brandName.slice(0, 2).toUpperCase()}</div>
           <div>
-            <strong>PARTNERX</strong>
-            <p>{t(lang, 'login_title')}</p>
+            <strong>{brandName}</strong>
           </div>
         </div>
         <nav className="sidebarNav">
@@ -146,7 +146,7 @@ export default function DashboardPage() {
       <section className="dashboardMain">
         <header className="dashboardHeader">
           <div>
-            <p className="dashboardBreadcrumb">{t(lang, 'breadcrumb')}</p>
+            <p className="dashboardBreadcrumb">{t(lang, 'nav_home')} / {brandName}</p>
             <h1 className="dashboardTitle">{pageTitle}</h1>
             <p className="dashboardBreadcrumb">{t(lang, 'last_sync_time')}: {formatLastSyncTime(data?.lastSyncTime ?? null, lang)}</p>
           </div>
