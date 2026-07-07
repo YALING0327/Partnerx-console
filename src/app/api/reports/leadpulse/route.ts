@@ -78,9 +78,9 @@ async function computeRangeStats(startYmd: string, endYmd: string): Promise<{
     .from('employees')
     .select('id, employee_name, status')
     .eq('company_id', LEADPULSE_COMPANY_ID);
-  const nameById = new Map<string, string>(
-    (employeeRows as EmployeeRow[] | null ?? []).map((e) => [e.id, e.employee_name])
-  );
+  const allEmployees = (employeeRows as EmployeeRow[] | null ?? []);
+  const nameById = new Map<string, string>(allEmployees.map((e) => [e.id, e.employee_name]));
+  const activeEmployeeIds = allEmployees.filter((e) => e.status === 'active').map((e) => e.id);
 
   // 拉新：bind_time 落在 [start, end] 当日区间（北京时区）
   const newAttrs = await fetchAll<AttrRow>(
@@ -120,7 +120,12 @@ async function computeRangeStats(startYmd: string, endYmd: string): Promise<{
     amountByEmployee.set(r.employee_id, (amountByEmployee.get(r.employee_id) ?? 0) + Number(r.amount || 0));
   }
 
-  const employeeIds = new Set<string>([...newByEmployee.keys(), ...paidByEmployee.keys()]);
+  // 列出全部在职员工（含当期零数据者），再并入任何有数据但已停用的员工，保证合计对得上。
+  const employeeIds = new Set<string>([
+    ...activeEmployeeIds,
+    ...newByEmployee.keys(),
+    ...paidByEmployee.keys()
+  ]);
   const employees: EmployeeStat[] = Array.from(employeeIds).map((id) => ({
     employeeId: id,
     name: nameById.get(id) ?? '未知员工',
@@ -129,7 +134,13 @@ async function computeRangeStats(startYmd: string, endYmd: string): Promise<{
     amountCents: amountByEmployee.get(id) ?? 0
   }));
 
-  employees.sort((a, b) => b.amountCents - a.amountCents || b.newUsers - a.newUsers);
+  employees.sort(
+    (a, b) =>
+      b.amountCents - a.amountCents ||
+      b.newUsers - a.newUsers ||
+      b.paidUsers - a.paidUsers ||
+      a.name.localeCompare(b.name)
+  );
 
   const totalNew = employees.reduce((s, e) => s + e.newUsers, 0);
   const totalPaid = employees.reduce((s, e) => s + e.paidUsers, 0);
@@ -138,26 +149,52 @@ async function computeRangeStats(startYmd: string, endYmd: string): Promise<{
   return { employees, totalNew, totalPaid, totalCents };
 }
 
+// 计数环比：🔺+N / 🔻-N / ➖
+function deltaCount(cur: number, prev: number) {
+  const d = cur - prev;
+  if (d > 0) return ` 🔺${d}`;
+  if (d < 0) return ` 🔻${-d}`;
+  return ' ➖';
+}
+
+// 金额环比（分）：🔺+$X / 🔻-$X / ➖
+function deltaUsd(curCents: number, prevCents: number) {
+  const d = curCents - prevCents;
+  if (d > 0) return ` 🔺$${fmtUsd(d)}`;
+  if (d < 0) return ` 🔻$${fmtUsd(-d)}`;
+  return ' ➖';
+}
+
 function buildCard(params: {
   mode: 'daily' | 'weekly';
   rangeLabel: string;
   stats: Awaited<ReturnType<typeof computeRangeStats>>;
+  prev: Awaited<ReturnType<typeof computeRangeStats>>;
 }) {
-  const { mode, rangeLabel, stats } = params;
+  const { mode, rangeLabel, stats, prev } = params;
   const isWeekly = mode === 'weekly';
+  const compareLabel = isWeekly ? '上周' : '前一天';
   const title = isWeekly ? `🏆 LeadPulse 上周汇总 · ${rangeLabel}` : `📊 LeadPulse 每日战报 · ${rangeLabel}`;
 
+  const prevById = new Map(prev.employees.map((e) => [e.employeeId, e]));
+
   const summary =
-    `**合计**　拉新 **${stats.totalNew}** 人　·　付费 **${stats.totalPaid}** 人　·　充值 **$${fmtUsd(stats.totalCents)}**`;
+    `**合计**　拉新 **${stats.totalNew}**${deltaCount(stats.totalNew, prev.totalNew)}　·　` +
+    `付费 **${stats.totalPaid}**${deltaCount(stats.totalPaid, prev.totalPaid)}　·　` +
+    `充值 **$${fmtUsd(stats.totalCents)}**${deltaUsd(stats.totalCents, prev.totalCents)}`;
 
   const medals = ['🥇', '🥈', '🥉'];
   const lines =
     stats.employees.length === 0
-      ? '_本区间暂无拉新与充值数据_'
+      ? '_本区间暂无员工数据_'
       : stats.employees
           .map((e, i) => {
-            const rank = medals[i] ?? `**${i + 1}.**`;
-            return `${rank} ${e.name}　拉新 ${e.newUsers} · 付费 ${e.paidUsers} · $${fmtUsd(e.amountCents)}`;
+            const hasActivity = e.newUsers > 0 || e.paidUsers > 0 || e.amountCents > 0;
+            const rank = hasActivity && i < 3 ? medals[i] : `**${i + 1}.**`;
+            const p = prevById.get(e.employeeId);
+            const prevAmount = p?.amountCents ?? 0;
+            const amtDelta = e.amountCents === 0 && prevAmount === 0 ? '' : deltaUsd(e.amountCents, prevAmount);
+            return `${rank} ${e.name}　拉新 ${e.newUsers} · 付费 ${e.paidUsers} · $${fmtUsd(e.amountCents)}${amtDelta}`;
           })
           .join('\n');
 
@@ -173,12 +210,7 @@ function buildCard(params: {
       { tag: 'div', text: { tag: 'lark_md', content: lines } },
       {
         tag: 'note',
-        elements: [
-          {
-            tag: 'plain_text',
-            content: `口径：北京时间 ${rangeLabel}｜充值以老板端为准（全量成功订单，未扣手续费）`
-          }
-        ]
+        elements: [{ tag: 'plain_text', content: `北京时间 ${rangeLabel}　·　环比${compareLabel}（🔺升 🔻降）` }]
       }
     ]
   };
@@ -214,23 +246,32 @@ export async function GET(request: Request) {
 
     let startYmd: string;
     let endYmd: string;
+    let prevStartYmd: string;
+    let prevEndYmd: string;
     let rangeLabel: string;
     if (mode === 'weekly') {
       const thisMonday = mondayOf(refYmd);
       startYmd = addDaysYmd(thisMonday, -7); // 上周一
       endYmd = addDaysYmd(thisMonday, -1); // 上周日
+      prevStartYmd = addDaysYmd(startYmd, -7); // 上上周一
+      prevEndYmd = addDaysYmd(endYmd, -7); // 上上周日
       rangeLabel = `${startYmd} ~ ${endYmd}`;
     } else {
       startYmd = addDaysYmd(refYmd, -1); // 前一天
       endYmd = startYmd;
+      prevStartYmd = addDaysYmd(startYmd, -1); // 前两天
+      prevEndYmd = prevStartYmd;
       rangeLabel = startYmd;
     }
 
-    const stats = await computeRangeStats(startYmd, endYmd);
-    const card = buildCard({ mode, rangeLabel, stats });
+    const [stats, prev] = await Promise.all([
+      computeRangeStats(startYmd, endYmd),
+      computeRangeStats(prevStartYmd, prevEndYmd)
+    ]);
+    const card = buildCard({ mode, rangeLabel, stats, prev });
 
     if (dryRun) {
-      return NextResponse.json({ ok: true, dryRun: true, mode, startYmd, endYmd, stats, card });
+      return NextResponse.json({ ok: true, dryRun: true, mode, startYmd, endYmd, stats, prev, card });
     }
 
     const sent = await sendToFeishu(card);
