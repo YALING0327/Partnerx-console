@@ -13,7 +13,7 @@ import ChatView from './components/ChatView';
 
 const PAGE_SIZE = 20;
 
-const EMPTY_FILTERS: UserFilters = { startDate: '', endDate: '', employee: '', userIdKeyword: '' };
+const EMPTY_FILTERS: UserFilters = { startDate: '', endDate: '', employee: '', userIdKeyword: '', sortBy: '' };
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -62,6 +62,7 @@ export default function DashboardPage() {
           metricEndDate: med || undefined,
           filterEmployee: f.employee || undefined,
           userIdKeyword: f.userIdKeyword || undefined,
+          sortBy: f.sortBy || undefined,
           page: p,
           pageSize: PAGE_SIZE,
           forceRefresh

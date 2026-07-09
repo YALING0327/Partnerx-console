@@ -12,10 +12,13 @@ LOG_FILE="${LOG_FILE:-$APP_DIR/leadpulse-report.log}"
 mkdir -p "$(dirname "$LOG_FILE")"
 
 if [ -f "$APP_DIR/.env.local" ]; then
-  set -a
-  # shellcheck disable=SC1090
-  source "$APP_DIR/.env.local"
-  set +a
+  # 只提取需要的变量，避免 source 整个 .env.local（文件里含带括号的 SQL，source 会报语法错误）
+  _env_val() {
+    { grep -E "^$1=" "$APP_DIR/.env.local" | tail -n 1 | cut -d= -f2- | sed -e 's/^["'"'"']//' -e 's/["'"'"']$//'; } || true
+  }
+  REPORT_TRIGGER_SECRET="${REPORT_TRIGGER_SECRET:-$(_env_val REPORT_TRIGGER_SECRET)}"
+  _base_url="$(_env_val REPORT_BASE_URL)"
+  [ -n "$_base_url" ] && REPORT_BASE_URL="$_base_url"
 fi
 
 if [ -z "${REPORT_TRIGGER_SECRET:-}" ]; then

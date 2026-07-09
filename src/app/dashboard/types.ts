@@ -82,12 +82,15 @@ export type DashboardData =
 export type View = 'home' | 'employees' | 'users' | 'backfill' | 'chat';
 export type BackfillMode = 'employee' | 'user' | 'order';
 
+export type UserSortBy = '' | 'amountDesc' | 'amountAsc';
+
 // 用户明细的「已应用」筛选条件（发给后端做服务端筛选+分页）
 export type UserFilters = {
   startDate: string;
   endDate: string;
   employee: string;
   userIdKeyword: string;
+  sortBy: UserSortBy;
 };
 
 export function authPayload(user: StoredUser) {

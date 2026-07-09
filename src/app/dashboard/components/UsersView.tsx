@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { t, type Lang } from '@/lib/i18n';
-import { authPayload, type BossEmployee, type DashboardUser, type StoredUser, type UserFilters } from '../types';
+import { authPayload, type BossEmployee, type DashboardUser, type StoredUser, type UserFilters, type UserSortBy } from '../types';
 import { exportCsv, fmt, fmtDate, platformLabel, postJson } from '../utils';
 
 type Props = {
@@ -25,6 +25,7 @@ export default function UsersView({ user, lang, isBoss, employees, users, totalU
   const [startDate, setStartDate] = useState(filters.startDate);
   const [endDate, setEndDate] = useState(filters.endDate);
   const [filterEmployee, setFilterEmployee] = useState(filters.employee);
+  const [sortBy, setSortBy] = useState<UserSortBy>(filters.sortBy);
   const [userNicknames, setUserNicknames] = useState<Record<string, string>>({});
   const [nicknamesLoading, setNicknamesLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -62,7 +63,13 @@ export default function UsersView({ user, lang, isBoss, employees, users, totalU
   }, [pageUserIdsKey]);
 
   function applyFilters() {
-    onApplyFilters({ userIdKeyword, startDate, endDate, employee: filterEmployee });
+    onApplyFilters({ userIdKeyword, startDate, endDate, employee: filterEmployee, sortBy });
+  }
+
+  // 排序选项一变即生效，不需要额外点“查找”
+  function handleSortChange(next: UserSortBy) {
+    setSortBy(next);
+    onApplyFilters({ userIdKeyword, startDate, endDate, employee: filterEmployee, sortBy: next });
   }
 
   function clearFilters() {
@@ -70,7 +77,8 @@ export default function UsersView({ user, lang, isBoss, employees, users, totalU
     setStartDate('');
     setEndDate('');
     setFilterEmployee('');
-    onApplyFilters({ userIdKeyword: '', startDate: '', endDate: '', employee: '' });
+    setSortBy('');
+    onApplyFilters({ userIdKeyword: '', startDate: '', endDate: '', employee: '', sortBy: '' });
   }
 
   async function handleExport() {
@@ -83,6 +91,7 @@ export default function UsersView({ user, lang, isBoss, employees, users, totalU
         endDate: filters.endDate || undefined,
         filterEmployee: filters.employee || undefined,
         userIdKeyword: filters.userIdKeyword || undefined,
+        sortBy: filters.sortBy || undefined,
         includeAllUsers: true
       });
       const allUsers = result.users ?? [];
@@ -147,9 +156,17 @@ export default function UsersView({ user, lang, isBoss, employees, users, totalU
             </select>
           </label>
         )}
+        <label className="filterField">
+          <span>{t(lang, 'filter_sort')}</span>
+          <select className="filterSelect" value={sortBy} onChange={(e) => handleSortChange(e.target.value as UserSortBy)}>
+            <option value="">{t(lang, 'sort_default')}</option>
+            <option value="amountDesc">{t(lang, 'sort_amount_desc')}</option>
+            <option value="amountAsc">{t(lang, 'sort_amount_asc')}</option>
+          </select>
+        </label>
         <button className="addBtn" onClick={applyFilters}>{t(lang, 'filter_search')}</button>
         <button className="actionBtn" onClick={onRefresh}>{t(lang, 'filter_refresh')}</button>
-        {(userIdKeyword || startDate || endDate || filterEmployee || filters.userIdKeyword || filters.startDate || filters.endDate || filters.employee) && (
+        {(userIdKeyword || startDate || endDate || filterEmployee || sortBy || filters.userIdKeyword || filters.startDate || filters.endDate || filters.employee || filters.sortBy) && (
           <button className="cancelBtn" onClick={clearFilters}>{t(lang, 'filter_clear')}</button>
         )}
       </div>

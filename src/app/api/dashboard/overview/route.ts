@@ -21,6 +21,8 @@ type DashboardRequest = {
   pageSize?: number;
   filterEmployee?: string;
   userIdKeyword?: string;
+  // 用户明细排序：按当前筛选范围内的累计充值金额排序，用于快速找大额充值用户（"大哥"）
+  sortBy?: '' | 'amountDesc' | 'amountAsc';
   // CSV 导出用：返回筛选后的全部用户（不分页）
   includeAllUsers?: boolean;
 };
@@ -231,6 +233,10 @@ function selectUsersPage(allUsers: DashboardUserItem[], body: DashboardRequest) 
   let users = allUsers;
   if (employeeName) users = users.filter((item) => item.employeeName === employeeName);
   if (keyword) users = users.filter((item) => String(item.platformUserId).includes(keyword));
+  if (body.sortBy === 'amountDesc' || body.sortBy === 'amountAsc') {
+    const direction = body.sortBy === 'amountDesc' ? -1 : 1;
+    users = [...users].sort((a, b) => direction * (Number(a.totalAmount || 0) - Number(b.totalAmount || 0)));
+  }
   const totalUsers = users.length;
   if (body.includeAllUsers) {
     return { users, totalUsers };

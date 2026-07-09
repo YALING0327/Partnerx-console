@@ -21,12 +21,11 @@ cat <<CRON | crontab -
 # 每天 04:00 做一次最近 30 天的充值全量对账修复
 0 4 * * * APP_DIR=$APP_DIR bash $APP_DIR/scripts/run-recharge-integrity-safe.sh
 
-# ===== LeadPulse 飞书战报（北京时间）=====
-CRON_TZ=Asia/Shanghai
-# 每天 09:00 播报前一天数据
-0 9 * * * APP_DIR=$APP_DIR bash $APP_DIR/scripts/run-leadpulse-report.sh daily
-# 每周一 09:05 追加上周（周一~周日）汇总
-5 9 * * 1 APP_DIR=$APP_DIR bash $APP_DIR/scripts/run-leadpulse-report.sh weekly
+# ===== LeadPulse 飞书战报（Debian cron 不支持 CRON_TZ，直接用 UTC；北京 = UTC+8）=====
+# 每天 北京 09:00 = UTC 01:00 播报前一天数据
+0 1 * * * APP_DIR=$APP_DIR bash $APP_DIR/scripts/run-leadpulse-report.sh daily
+# 每周一 北京 09:05 = UTC 01:05 追加上周（周一~周日）汇总
+5 1 * * 1 APP_DIR=$APP_DIR bash $APP_DIR/scripts/run-leadpulse-report.sh weekly
 CRON
 
 echo "已安装 crontab（APP_DIR=$APP_DIR）："
