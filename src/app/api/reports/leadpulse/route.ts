@@ -219,7 +219,7 @@ function buildCard(params: {
   };
 }
 
-async function sendToFeishu(card: unknown) {
+async function sendToFeishuOnce(card: unknown) {
   const timestamp = Math.floor(Date.now() / 1000);
   const sign = feishuSign(FEISHU_SECRET, timestamp);
   const res = await fetch(FEISHU_WEBHOOK, {
@@ -229,6 +229,22 @@ async function sendToFeishu(card: unknown) {
   });
   const data = await res.json().catch(() => ({}));
   return { httpOk: res.ok, data };
+}
+
+// 飞书偶发服务端错误（如 code 19006 internal error）会直接吞掉消息，重试几次保证送达。
+async function sendToFeishu(card: unknown, maxAttempts = 3) {
+  let last: Awaited<ReturnType<typeof sendToFeishuOnce>> = { httpOk: false, data: {} };
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      last = await sendToFeishuOnce(card);
+      const ok = last.httpOk && (last.data?.code === 0 || last.data?.StatusCode === 0);
+      if (ok) return { ...last, attempts: attempt };
+    } catch (error) {
+      last = { httpOk: false, data: { error: String(error) } };
+    }
+    if (attempt < maxAttempts) await new Promise((r) => setTimeout(r, attempt * 3000));
+  }
+  return { ...last, attempts: maxAttempts };
 }
 
 export async function GET(request: Request) {
